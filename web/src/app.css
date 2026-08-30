@@ -1,0 +1,163 @@
+/*
+ * publix design tokens.
+ *
+ * The dashboard is a tool people look at while something is going wrong, so
+ * the palette is quiet, the type is dense but legible, and status colour is
+ * reserved for status alone — nothing decorative is ever green or red.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #fbfbfc;
+  --bg-raised: #ffffff;
+  --bg-sunken: #f2f3f5;
+  --bg-hover: #f5f6f8;
+  --border: #e3e5e9;
+  --border-strong: #cfd2d9;
+
+  --text: #14161a;
+  --text-muted: #62676f;
+  --text-faint: #8b9099;
+
+  --accent: #157a4a;
+  --accent-bg: #e6f4ec;
+  --accent-text: #0f5c37;
+
+  --good: #157a4a;
+  --good-bg: #e6f4ec;
+  --bad: #b3261e;
+  --bad-bg: #fce9e7;
+  --warn: #8a5a00;
+  --warn-bg: #fdf0d9;
+  --busy: #1f5fa8;
+  --busy-bg: #e6eefa;
+
+  --radius: 8px;
+  --radius-sm: 5px;
+  --shadow: 0 1px 2px rgb(16 20 28 / 6%), 0 4px 12px rgb(16 20 28 / 5%);
+  --shadow-lg: 0 8px 32px rgb(16 20 28 / 14%);
+
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
+    'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1013;
+    --bg-raised: #16191e;
+    --bg-sunken: #0a0c0f;
+    --bg-hover: #1d2127;
+    --border: #262b33;
+    --border-strong: #3a414b;
+
+    --text: #e8eaed;
+    --text-muted: #99a0aa;
+    --text-faint: #6c737d;
+
+    --accent: #4ec98a;
+    --accent-bg: #12291e;
+    --accent-text: #6fd9a1;
+
+    --good: #4ec98a;
+    --good-bg: #12291e;
+    --bad: #f2837a;
+    --bad-bg: #2c1614;
+    --warn: #e0b355;
+    --warn-bg: #2b2211;
+    --busy: #6fa8e8;
+    --busy-bg: #14202f;
+
+    --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 4px 12px rgb(0 0 0 / 30%);
+    --shadow-lg: 0 8px 32px rgb(0 0 0 / 55%);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  min-height: 100%;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.011em;
+}
+
+h1 { font-size: 20px; }
+h2 { font-size: 16px; }
+h3 { font-size: 14px; }
+
+p { margin: 0 0 12px; }
+p:last-child { margin-bottom: 0; }
+
+a {
+  color: var(--accent-text);
+  text-decoration: none;
+}
+a:hover { text-decoration: underline; }
+
+code, pre, .mono {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-variant-ligatures: none;
+}
+
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* Never remove a focus ring; make it a good one. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+::selection {
+  background: var(--accent-bg);
+  color: var(--accent-text);
+}
+
+/* Utility layout classes used widely enough to be worth centralising. */
+.row { display: flex; align-items: center; gap: 8px; }
+.col { display: flex; flex-direction: column; gap: 8px; }
+.spread { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.grow { flex: 1; min-width: 0; }
+.wrap { flex-wrap: wrap; }
+.muted { color: var(--text-muted); }
+.faint { color: var(--text-faint); }
+.small { font-size: 12.5px; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nowrap { white-space: nowrap; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

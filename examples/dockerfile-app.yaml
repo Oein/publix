@@ -1,0 +1,18 @@
+# A service with its own Dockerfile.
+#
+# This is the whole file for most repositories: publix reads the Dockerfile,
+# takes the port from its EXPOSE directive, and defaults everything else.
+
+name: api
+domains:
+  - api.example.com
+
+port: 8080
+
+env:
+  DATABASE_URL: ${secret.DATABASE_URL}
+  LOG_LEVEL: ${secret.LOG_LEVEL:-info}
+
+health:
+  path: /healthz
+  grace: 45s

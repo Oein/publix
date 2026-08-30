@@ -1,0 +1,23 @@
+# A static site.
+#
+# publix runs the build on the host — so your lockfile, caches and toolchain
+# apply — then packages the output into a small nginx image. Fingerprinted
+# assets are cached forever; HTML never is, so a deploy is visible at once.
+#
+# With a recognised framework (Vite, Astro, CRA, Angular) none of the build
+# block is needed: it is detected from package.json and the lockfile.
+
+name: marketing
+type: static
+
+domains:
+  - example.com
+routes:
+  - domain: www.example.com
+    redirectTo: example.com
+
+build:
+  install: npm ci
+  command: npm run build
+  output: dist
+  spa: true      # rewrite unknown paths to index.html

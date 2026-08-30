@@ -92,6 +92,14 @@ type Options struct {
 	RollbackFrom string
 	// Force rebuilds even when a usable image already exists.
 	Force bool
+	// Image deploys an existing publix-built image as-is, skipping the
+	// build entirely. Rollback uses it when the target's image is still on
+	// disk, which is the case the two-image retention exists to serve.
+	Image string
+	// Spec overrides the deployment.yaml read from the checkout. Rollback
+	// passes the target deployment's own snapshot, so restoring a
+	// deployment restores its configuration and not merely its code.
+	Spec string
 	// Message and Author override the commit metadata, used when a webhook
 	// already knows them and the checkout is shallow.
 	Message string
@@ -335,7 +343,7 @@ func (e *Engine) run(ctx context.Context, projectID, deploymentID string, opt Op
 	if err := e.checkout(ctx, dc, opt); err != nil {
 		return err
 	}
-	if err := e.loadSpec(dc); err != nil {
+	if err := e.loadSpec(dc, opt); err != nil {
 		return err
 	}
 	if err := e.prepare(ctx, dc); err != nil {

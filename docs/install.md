@@ -1,0 +1,207 @@
+# Installing publix
+
+publix is one binary. It needs a Docker socket, a Traefik that watches a
+file-provider directory, and somewhere to keep its state.
+
+## 1. Build
+
+```
+git clone https://github.com/Oein/publix
+cd publix
+make build          # builds the dashboard, then the binary
+sudo make install   # puts it in /usr/local/bin
+```
+
+Requires Go 1.24 and Node 20+. `make go` alone rebuilds only the binary,
+reusing whatever dashboard is already built.
+
+## 2. The shared network
+
+Traefik and every project container share one network:
+
+```
+docker network create publix
+```
+
+## 3. Traefik
+
+publix needs two things from Traefik: the **Docker provider**, so it can
+discover a deployment's containers, and a **watched file provider**, so it
+can move traffic between them.
+
+`/etc/traefik/traefik.yml`:
+
+```yaml
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ":443"
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: publix
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: you@example.com
+      storage: /etc/traefik/acme.json
+      httpChallenge:
+        entryPoint: web
+
+log:
+  level: INFO
+```
+
+Run it:
+
+```yaml
+# /etc/traefik/docker-compose.yml
+services:
+  traefik:
+    image: traefik:v3.3
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /etc/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - /etc/traefik/dynamic:/etc/traefik/dynamic
+      - /etc/traefik/acme.json:/etc/traefik/acme.json
+    networks: [publix]
+
+networks:
+  publix:
+    external: true
+```
+
+```
+touch /etc/traefik/acme.json && chmod 600 /etc/traefik/acme.json
+mkdir -p /etc/traefik/dynamic
+docker compose -f /etc/traefik/docker-compose.yml up -d
+```
+
+`exposedByDefault: false` matters: without it Traefik would try to route
+every container on the host, publix's own build containers included.
+
+## 4. DNS
+
+Point a wildcard at the host so every project gets a URL without any further
+setup:
+
+```
+*.apps.example.com.   A   203.0.113.10
+publix.example.com.   A   203.0.113.10
+```
+
+Custom domains for individual projects are separate A records, added
+whenever you like.
+
+## 5. Run publix
+
+Bind it to loopback. It talks to the Docker socket, which is equivalent to
+root on the host, so it should not be directly reachable.
+
+`/etc/systemd/system/publix.service`:
+
+```ini
+[Unit]
+Description=publix
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/publix serve --addr 127.0.0.1:4321
+Restart=always
+RestartSec=5
+Environment=PUBLIX_HOME=/var/lib/publix
+
+# publix needs to write into Traefik's dynamic directory and create the
+# shared-volume directories projects mount.
+ReadWritePaths=/var/lib/publix /etc/traefik/dynamic
+
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```
+sudo systemctl enable --now publix
+sudo journalctl -u publix -f
+```
+
+## 6. Expose the dashboard
+
+publix does not route itself — it has no deployment of its own. Give it a
+Traefik router in the file provider, in a file of your own (publix only ever
+writes `publix.yml`, and leaves everything else in the directory alone):
+
+`/etc/traefik/dynamic/dashboard.yml`:
+
+```yaml
+http:
+  routers:
+    publix-dashboard:
+      rule: "Host(`publix.example.com`)"
+      entryPoints: [websecure]
+      service: publix-dashboard
+      tls:
+        certResolver: letsencrypt
+  services:
+    publix-dashboard:
+      loadBalancer:
+        servers:
+          - url: "http://172.17.0.1:4321"   # the host, from Traefik's container
+```
+
+If Traefik runs on the host rather than in a container, use
+`http://127.0.0.1:4321`.
+
+## 7. First run
+
+Open `https://publix.example.com`, set a password, then under
+**Settings → Server**:
+
+- **Apps domain**: `apps.example.com`
+- **Public URL**: `https://publix.example.com`
+
+Connect GitHub under **Settings → GitHub**, and import a repository.
+
+## Where state lives
+
+| Path                          | What                                      |
+| ----------------------------- | ----------------------------------------- |
+| `/var/lib/publix/publix.json` | projects, settings, secrets (mode 0600)   |
+| `/var/lib/publix/work/`       | repository checkouts, reused across deploys |
+| `/var/lib/publix/logs/`       | build logs, one file per deployment       |
+| `/etc/traefik/dynamic/publix.yml` | generated routing — do not edit       |
+
+`publix.json` is the only file worth backing up. Everything else is
+reconstructible: checkouts re-clone, logs are history, and the routing file
+is regenerated by `publix reconcile`.
+
+## Upgrading
+
+```
+git pull && make build && sudo make install
+sudo systemctl restart publix
+```
+
+Running containers are not touched by a restart. On startup publix rewrites
+the routing file from its own state, so anything that drifted while it was
+down is corrected.

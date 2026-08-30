@@ -174,11 +174,20 @@ func (e *Engine) updateDeploymentMeta(dc *Context, git gitmeta.Info, opt Options
 
 // loadSpec reads deployment.yaml from the checkout and resolves it against
 // what is actually in the repository.
-func (e *Engine) loadSpec(dc *Context) error {
+func (e *Engine) loadSpec(dc *Context, opt Options) error {
 	root := dc.Root
 	var sp *deployspec.Spec
 
-	if dc.Project.SpecPath != "" {
+	if opt.Spec != "" {
+		// A rollback supplies the target deployment's own snapshot, so the
+		// configuration that was live then comes back with it.
+		parsed, err := deployspec.Parse([]byte(opt.Spec))
+		if err != nil {
+			return fmt.Errorf("the recorded configuration for that deployment is unreadable: %w", err)
+		}
+		sp = parsed
+		dc.Log.Printf("Using the configuration recorded for that deployment")
+	} else if dc.Project.SpecPath != "" {
 		raw, err := os.ReadFile(filepath.Join(root, dc.Project.SpecPath))
 		if err != nil {
 			return fmt.Errorf("reading %s: %w", dc.Project.SpecPath, err)
@@ -193,10 +202,12 @@ func (e *Engine) loadSpec(dc *Context) error {
 		}
 	}
 
-	if path, ok := deployspec.Find(root); ok && dc.Project.SpecPath == "" {
-		dc.Log.Printf("Using %s", filepath.Base(path))
-	} else if dc.Project.SpecPath == "" {
-		dc.Log.Printf("No deployment.yaml found; deploying with detected settings")
+	if opt.Spec == "" {
+		if path, ok := deployspec.Find(root); ok && dc.Project.SpecPath == "" {
+			dc.Log.Printf("Using %s", filepath.Base(path))
+		} else if dc.Project.SpecPath == "" {
+			dc.Log.Printf("No deployment.yaml found; deploying with detected settings")
+		}
 	}
 
 	resolved, err := sp.Resolve(root)

@@ -1,0 +1,36 @@
+# A Compose stack.
+#
+# publix reads your compose file and layers its own additions on with a
+# generated override — it never modifies your repository. Only the service
+# named here is exposed; the rest of the stack stays on its own network.
+#
+# The Compose project name is stable across deploys, so named volumes keep
+# their data. Because Compose replaces containers in place, these projects
+# always use the `recreate` strategy.
+
+name: shop
+type: compose
+compose: docker-compose.yml
+
+# Which service the domains point at, and the port it listens on.
+service: web
+port: 3000
+
+domains:
+  - shop.example.com
+
+# Every service in the stack receives these.
+env:
+  POSTGRES_PASSWORD: ${secret.POSTGRES_PASSWORD}
+  REDIS_URL: redis://cache:6379
+
+volumes:
+  # Mounted into every service unless `services:` narrows it.
+  - name: disk0
+    mountPath: /shared/disk0
+    services: [web, worker]
+
+cron:
+  - name: nightly-report
+    schedule: "0 3 * * *"
+    command: ["node", "scripts/report.js"]

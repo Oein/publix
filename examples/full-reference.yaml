@@ -1,0 +1,113 @@
+# Every field publix understands, with its default.
+#
+# You will never need a file this long. It exists so you can see what is
+# available and what a setting does without leaving your editor.
+
+# --- identity -------------------------------------------------------------
+
+name: my-app                  # defaults to the repository name
+
+# --- build ----------------------------------------------------------------
+
+type: auto                    # auto | dockerfile | compose | static | image
+context: .                    # build context, relative to the repo root
+
+dockerfile: Dockerfile        # type: dockerfile
+compose: docker-compose.yml   # type: compose
+service: web                  # type: compose — which service is exposed
+image: ghcr.io/acme/app:1.0   # type: image
+
+build:
+  target: ""                  # a stage of a multi-stage Dockerfile
+  pull: false                 # refresh base images every build
+  args:                       # --build-arg values; NOT available at runtime
+    VERSION: "1.0"
+
+  # type: static only
+  install: npm ci
+  command: npm run build
+  output: dist
+  spa: false                  # rewrite unknown paths to index.html
+  runtime: nginx:1.27-alpine  # base image that serves the output
+
+# --- runtime --------------------------------------------------------------
+
+port: 3000                    # the port your app listens on in the container
+replicas: 1                   # ignored for compose projects
+command: []                   # overrides the image's default command
+
+env:
+  NODE_ENV: production
+  DATABASE_URL: ${secret.DATABASE_URL}    # from the dashboard
+  REGION: ${env.REGION}                   # from the publix server's own env
+  BUILD: ${publix.COMMIT}                 # deployment metadata
+  LOG_LEVEL: ${secret.LOG_LEVEL:-info}    # optional, with a default
+
+resources:
+  cpu: "1"                    # fractional cores
+  memory: 512M
+  memoryReservation: 256M     # soft limit
+  pidsLimit: 0                # 0 means no limit
+
+# --- storage --------------------------------------------------------------
+
+# Volumes are registered on the server; a project names one, never a path.
+# It receives <host path>/<project id>, which is the isolation boundary.
+volumes:
+  - disk0                     # mounts at /shared/disk0
+
+  - name: uploads
+    mountPath: /var/uploads
+    subPath: ""               # a subdirectory of this project's own area
+    readOnly: false
+    services: []              # compose only; empty means every service
+
+# --- routing --------------------------------------------------------------
+
+domains:
+  - app.example.com
+
+routes:
+  - domain: www.example.com
+    redirectTo: app.example.com
+
+  - domain: example.com
+    path: /api
+    stripPath: true
+    tls: true
+    headers:
+      X-Robots-Tag: noindex
+    basicAuth:
+      - "user:$apr1$hashed"   # htpasswd format
+    service: ""               # compose only; which service this route reaches
+
+# --- health ---------------------------------------------------------------
+
+# The gate a new deployment must pass before any traffic reaches it.
+health:
+  type: http                  # http | tcp | exec | none
+  path: /
+  port: 0                     # defaults to `port` above
+  status: 200
+  command: []                 # type: exec
+  interval: 2s
+  timeout: 5s
+  grace: 90s                  # how long the app has to become healthy
+  headers: {}
+
+# --- release --------------------------------------------------------------
+
+release:
+  strategy: blue-green        # blue-green | recreate (compose is always recreate)
+  drain: 10s                  # how long the old generation keeps serving
+  autoRollback: true          # remove a deployment that fails its health gate
+  branch: main                # the branch that deploys to production
+
+# --- scheduled jobs -------------------------------------------------------
+
+cron:
+  - name: nightly
+    schedule: "0 3 * * *"     # 5-field cron, or @daily / @hourly / @weekly
+    command: ["node", "scripts/nightly.js"]
+    timeout: 1h
+    service: ""               # compose only; whose image to run

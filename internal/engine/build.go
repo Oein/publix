@@ -30,6 +30,23 @@ func (e *Engine) build(ctx context.Context, dc *Context, opt Options) error {
 		return nil
 	}
 
+	// A rollback to a deployment whose image survived pruning deploys that
+	// exact image. There is nothing to rebuild: the bytes that were live
+	// are still on disk.
+	if opt.Image != "" && !opt.Force {
+		have, err := e.docker.ImageExists(ctx, opt.Image)
+		if err != nil {
+			return err
+		}
+		if have {
+			dc.Log.Printf("Reusing image %s from the target deployment", opt.Image)
+			dc.Image = opt.Image
+			e.recordImage(dc, opt.Image)
+			return nil
+		}
+		dc.Log.Printf("Image %s is no longer on disk; rebuilding from source", opt.Image)
+	}
+
 	tag := e.imageTag(dc)
 	dc.Image = tag
 
