@@ -1,0 +1,17 @@
+# Build output
+/publix
+/dist/
+/bin/
+
+# The dashboard is built into internal/api/dist for embedding.
+/internal/api/dist/*
+!/internal/api/dist/.gitkeep
+
+# Node
+node_modules/
+/web/dist/
+*.tsbuildinfo
+
+# Local state
+.publix/
+*.local.yaml
