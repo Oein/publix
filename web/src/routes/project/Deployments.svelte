@@ -24,6 +24,10 @@
   }
 
   async function rollback() {
+    if (plan && !plan.possible) {
+      notify.error(plan.reason);
+      return;
+    }
     try {
       const dep = await api.projects.rollback(project.id, rollbackTarget.id);
       notify.success('Rolling back');
@@ -79,7 +83,7 @@
           <a href="#/projects/{project.slug}/logs?deployment={d.id}">
             <Button size="sm" variant="ghost">Logs</Button>
           </a>
-          {#if d.id !== project.current && d.commit}
+          {#if d.id !== project.current && d.status !== 'failed'}
             <Button size="sm" onclick={() => openRollback(d)}>Roll back</Button>
           {/if}
         </div>
@@ -97,7 +101,9 @@
 {#if rollbackTarget}
   <Confirm
     title="Roll back to #{rollbackTarget.number}?"
-    message="This deploys {rollbackTarget.short || 'that commit'} again and moves production traffic to it once it is healthy."
+    message={rollbackTarget.short
+      ? `This brings back commit ${rollbackTarget.short} and moves production traffic to it once it is healthy.`
+      : 'This brings that deployment back and moves production traffic to it once it is healthy.'}
     confirmLabel="Roll back"
     onconfirm={rollback}
     onclose={() => (rollbackTarget = null)}

@@ -117,11 +117,13 @@
           <span class="sep">·</span>
           <span class="muted">{project.repo.branch}</span>
         {/if}
-        {#if project.live}
+        {#if subject(project.live?.message)}
           <span class="sep">·</span>
           <span class="muted truncate" title={project.live.message}>
             {subject(project.live.message)}
           </span>
+        {/if}
+        {#if project.live}
           <span class="sep">·</span>
           <span class="faint nowrap">{age(project.live.finishedAt ?? project.live.queuedAt)}</span>
         {/if}

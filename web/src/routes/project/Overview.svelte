@@ -113,6 +113,7 @@
     </Card>
   {/if}
 
+  <div class="full">
   <Card title="Containers">
     {#snippet actions()}
       <Button size="sm" variant="ghost" onclick={loadContainers}>Refresh</Button>
@@ -123,6 +124,7 @@
     {:else if containers.length === 0}
       <p class="muted small">No containers are running for this project.</p>
     {:else}
+      <div class="scroll">
       <table>
         <thead>
           <tr>
@@ -151,9 +153,10 @@
             </tr>
           {/each}
         </tbody>
-      </table>
+      </div>
     {/if}
   </Card>
+  </div>
 </div>
 
 <style>
@@ -163,6 +166,13 @@
     gap: 14px;
     align-items: start;
   }
+
+  /* The container table needs the whole row: squeezed into an auto-fit
+     column its right-hand values get clipped. */
+  .full { grid-column: 1 / -1; }
+
+  /* And on a narrow window it scrolls rather than the page doing so. */
+  .scroll { overflow-x: auto; }
 
   dl { margin: 0; display: flex; flex-direction: column; gap: 8px; }
   dl div { display: flex; gap: 12px; align-items: baseline; font-size: 13px; }
@@ -195,6 +205,18 @@
   }
   td { padding: 8px 0; border-bottom: 1px solid var(--border); }
   tr:last-child td { border-bottom: none; }
-  td:first-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  /* align-items keeps the name chip hugging its text instead of stretching
+     across the whole column. */
+  td:first-child {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    min-width: 0;
+  }
+  th:first-child, td:first-child { padding-right: 16px; }
+  /* Right-aligned columns need their own gutter, or two of them side by
+     side read as one word. */
+  .num { text-align: right; font-variant-numeric: tabular-nums; padding-left: 16px; }
+  th.num { padding-left: 16px; }
 </style>
