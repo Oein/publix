@@ -48,7 +48,9 @@
     {#if lines.length === 0}
       <div class="placeholder">{empty}</div>
     {:else}
-      {#each lines as line, i (line.seq ?? i)}
+      <!-- Unkeyed: a log is append-only, so index identity is correct, and
+           it stays robust if a stream ever re-delivers a sequence number. -->
+      {#each lines as line}
         <div class="line {line.stream ?? 'stdout'}">
           {#if line.container}<span class="src">{line.container}</span>{/if}<span class="text"
             >{line.text}</span

@@ -18,9 +18,13 @@ import (
 // derived facts the UI would otherwise have to compute for itself.
 type projectView struct {
 	*store.Project
-	URL      string            `json:"url,omitempty"`
-	Hosts    []string          `json:"hosts"`
-	Live     *store.Deployment `json:"live,omitempty"`
+	URL   string   `json:"url,omitempty"`
+	Hosts []string `json:"hosts"`
+	// Live is the deployment currently serving traffic, if any.
+	Live *store.Deployment `json:"live,omitempty"`
+	// Latest is the most recent deployment whatever its outcome, so a
+	// project whose only deployment failed does not read as never deployed.
+	Latest   *store.Deployment `json:"latest,omitempty"`
 	Building bool              `json:"building"`
 	Kind     string            `json:"kind,omitempty"`
 	Volumes  []string          `json:"volumes,omitempty"`
@@ -29,6 +33,10 @@ type projectView struct {
 func (s *Server) view(p *store.Project) projectView {
 	set := s.store.Settings()
 	v := projectView{Project: p.Redacted(), Hosts: []string{}}
+
+	if len(p.Deployments) > 0 {
+		v.Latest = p.Deployments[0]
+	}
 
 	var sp *deployspec.Spec
 	if live := p.LiveDeployment(); live != nil {

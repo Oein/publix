@@ -95,37 +95,24 @@ func (s *Server) handleBuildLogs(w http.ResponseWriter, r *http.Request) {
 		defer stop()
 	}
 
-	history, err := s.engine.Logs().Read(deploymentID)
-	if err == nil {
-		lastSeq := 0
+	// Replay everything written so far, remembering how far we got. The
+	// subscription was opened first, so it may re-deliver lines the replay
+	// already covered; lastSeq is what filters those out. Getting this
+	// wrong sends every line twice.
+	lastSeq := 0
+	if history, err := s.engine.Logs().Read(deploymentID); err == nil {
 		for _, ln := range history {
 			if err := send("line", ln); err != nil {
 				return
 			}
-			lastSeq = ln.Seq
-		}
-		if !isLive {
-			send("done", map[string]any{"seq": lastSeq})
-			return
-		}
-		// Drop any streamed line already covered by the history replay.
-		for stream != nil {
-			select {
-			case ln, open := <-stream:
-				if !open {
-					send("done", map[string]any{"seq": lastSeq})
-					return
-				}
-				if ln.Seq <= lastSeq {
-					continue
-				}
-				if err := send("line", ln); err != nil {
-					return
-				}
-			default:
+			if ln.Seq > lastSeq {
+				lastSeq = ln.Seq
 			}
-			break
 		}
+	}
+	if !isLive {
+		send("done", map[string]any{"seq": lastSeq})
+		return
 	}
 
 	ctx := r.Context()
@@ -138,9 +125,13 @@ func (s *Server) handleBuildLogs(w http.ResponseWriter, r *http.Request) {
 			return
 		case ln, open := <-stream:
 			if !open {
-				send("done", map[string]any{})
+				send("done", map[string]any{"seq": lastSeq})
 				return
 			}
+			if ln.Seq <= lastSeq {
+				continue // already delivered by the replay above
+			}
+			lastSeq = ln.Seq
 			if err := send("line", ln); err != nil {
 				return
 			}

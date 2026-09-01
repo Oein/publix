@@ -72,6 +72,12 @@ func (e *Engine) checkout(ctx context.Context, dc *Context, opt Options) error {
 }
 
 // fetch brings dir to the requested ref, cloning it first if needed.
+//
+// `ref` may be a branch, a tag or an exact commit, so the fetch is done in
+// the way git itself supports all three: ask the remote for the ref and
+// check out FETCH_HEAD. The fallback exists because a server may refuse to
+// serve an arbitrary commit directly, in which case everything is fetched
+// and the commit is resolved locally.
 func (e *Engine) fetch(ctx context.Context, dc *Context, dir, cloneURL, ref string) error {
 	isRepo := false
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
@@ -86,6 +92,9 @@ func (e *Engine) fetch(ctx context.Context, dc *Context, dir, cloneURL, ref stri
 				return err
 			}
 		}
+		// blob:none keeps the clone small without the surprises of a
+		// shallow one, which cannot later resolve an older commit for a
+		// rollback.
 		if err := e.git(ctx, dc, "", "clone", "--filter=blob:none", "--no-checkout", cloneURL, dir); err != nil {
 			return err
 		}
@@ -94,22 +103,27 @@ func (e *Engine) fetch(ctx context.Context, dc *Context, dir, cloneURL, ref stri
 		_ = e.git(ctx, dc, dir, "remote", "set-url", "origin", cloneURL)
 	}
 
-	if err := e.git(ctx, dc, dir, "fetch", "--force", "--prune", "origin", ref+":refs/publix/target"); err != nil {
-		// A raw commit sha cannot be fetched by refspec on every server;
-		// fall back to fetching everything and resolving locally.
-		if err2 := e.git(ctx, dc, dir, "fetch", "--force", "origin"); err2 != nil {
+	if err := e.git(ctx, dc, dir, "fetch", "--force", "--tags", "origin", ref); err == nil {
+		if err := e.git(ctx, dc, dir, "checkout", "--force", "--detach", "FETCH_HEAD"); err != nil {
+			return err
+		}
+	} else {
+		// The remote would not serve that ref directly. Fetch everything
+		// and resolve it locally, which covers a commit that is reachable
+		// but not itself a branch tip.
+		if err := e.git(ctx, dc, dir, "fetch", "--force", "--tags", "origin"); err != nil {
 			return fmt.Errorf("fetching %s: %w", ref, err)
 		}
-		if err2 := e.git(ctx, dc, dir, "checkout", "--force", "--detach", ref); err2 != nil {
-			return fmt.Errorf("checking out %s: %w", ref, err2)
+		if err := e.git(ctx, dc, dir, "checkout", "--force", "--detach", ref); err != nil {
+			return fmt.Errorf("checking out %s: %w", ref, err)
 		}
-	} else if err := e.git(ctx, dc, dir, "checkout", "--force", "--detach", "refs/publix/target"); err != nil {
-		return err
 	}
 
 	// Remove build output left by the previous deployment so a stale
-	// artifact can never be mistaken for a fresh one.
-	if err := e.git(ctx, dc, dir, "clean", "-ffdx", "-e", "node_modules", "-e", ".venv"); err != nil {
+	// artifact can never be mistaken for a fresh one. Dependency
+	// directories are kept: re-downloading them on every deploy is the
+	// single slowest thing a build can do.
+	if err := e.git(ctx, dc, dir, "clean", "-ffdx", "-e", "node_modules", "-e", ".venv", "-e", "vendor"); err != nil {
 		dc.Log.Printf("warning: could not clean the checkout: %v", err)
 	}
 	return nil

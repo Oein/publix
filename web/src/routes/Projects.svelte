@@ -82,6 +82,8 @@
             </Badge>
           {:else if project.paused}
             <Badge tone="warn">Paused</Badge>
+          {:else if project.latest?.status === 'failed'}
+            <Badge tone="bad" dot>Failed</Badge>
           {:else}
             <Badge tone="muted">Not deployed</Badge>
           {/if}
@@ -109,12 +111,19 @@
         </div>
 
         <div class="foot">
-          {#if project.live}
-            <span class="truncate commit" title={project.live.message}>
-              {#if project.live.short}<code>{project.live.short}</code>{/if}
-              {subject(project.live.message) || 'No commit message'}
+          {#if project.live || project.latest}
+            {@const d = project.live ?? project.latest}
+            <span class="commit" title={d.error || d.message}>
+              {#if d.short}<code>{d.short}</code>{/if}
+              <span class="truncate" class:err={!project.live && d.status === 'failed'}>
+                {#if !project.live && d.status === 'failed'}
+                  {d.error?.split('\n')[0] || 'Deployment failed'}
+                {:else}
+                  {subject(d.message) || 'No commit message'}
+                {/if}
+              </span>
             </span>
-            <span class="faint nowrap">{age(project.live.finishedAt ?? project.live.queuedAt)}</span>
+            <span class="faint nowrap">{age(d.finishedAt ?? d.queuedAt)}</span>
           {:else}
             <span class="faint">Never deployed</span>
           {/if}
@@ -189,6 +198,8 @@
   }
 
   .commit { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .commit .truncate { min-width: 0; }
+  .err { color: var(--bad); }
 
   .sep { color: var(--text-faint); }
 

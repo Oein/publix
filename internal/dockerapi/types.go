@@ -55,7 +55,11 @@ type ContainerInspect struct {
 	Name    string `json:"Name"`
 	Created string `json:"Created"`
 	Image   string `json:"Image"`
-	State   struct {
+	// RestartCount is how many times Docker has restarted this container.
+	// It is the only reliable way to tell a slow starter apart from one
+	// that is crash-looping, since a restarting container looks alive.
+	RestartCount int `json:"RestartCount"`
+	State        struct {
 		Status     string `json:"Status"`
 		Running    bool   `json:"Running"`
 		Paused     bool   `json:"Paused"`

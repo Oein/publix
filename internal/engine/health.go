@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Oein/publix/internal/deployspec"
+	"github.com/Oein/publix/internal/dockerapi"
 )
 
 // waitHealthy blocks until every replica of the new deployment passes its
@@ -55,21 +56,17 @@ func (e *Engine) waitHealthy(ctx context.Context, dc *Context, containers []stri
 			return nil
 		}
 
-		// A container that has already exited is never going to pass; fail
-		// immediately rather than burn the whole grace period waiting.
+		// A container that cannot start is never going to pass. Failing
+		// here rather than burning the whole grace period is the
+		// difference between a useful error and a timeout that says
+		// nothing about what went wrong.
 		for _, id := range pending {
 			info, err := e.docker.InspectContainer(ctx, id)
 			if err != nil {
 				continue
 			}
-			if !info.State.Running && !info.State.Restarting {
-				reason := fmt.Sprintf("exit code %d", info.State.ExitCode)
-				if info.State.OOMKilled {
-					reason = "killed for exceeding its memory limit"
-				} else if info.State.Error != "" {
-					reason = info.State.Error
-				}
-				return fmt.Errorf("%s stopped before it became healthy (%s)", info.Name, reason)
+			if reason := startupFailure(info); reason != "" {
+				return fmt.Errorf("%s %s\n\nIts last output is above.", info.Name, reason)
 			}
 		}
 
@@ -88,6 +85,29 @@ func (e *Engine) waitHealthy(ctx context.Context, dc *Context, containers []stri
 		case <-time.After(h.Interval.D()):
 		}
 	}
+}
+
+// startupFailure reports why a container will never become healthy, or ""
+// if it might still come up.
+//
+// A crash-looping container is the case worth catching: publix sets a
+// restart policy, so Docker keeps bringing it back and it never looks
+// "exited". Without counting restarts, a container dying instantly on every
+// attempt is indistinguishable from one that is merely slow to start.
+func startupFailure(info *dockerapi.ContainerInspect) string {
+	switch {
+	case info.State.OOMKilled:
+		return "was killed for exceeding its memory limit"
+	case info.RestartCount >= 3:
+		return fmt.Sprintf("is crash-looping: it has restarted %d times, last exiting with code %d",
+			info.RestartCount, info.State.ExitCode)
+	case !info.State.Running && !info.State.Restarting:
+		if info.State.Error != "" {
+			return "stopped before it became healthy: " + info.State.Error
+		}
+		return fmt.Sprintf("stopped before it became healthy, exiting with code %d", info.State.ExitCode)
+	}
+	return ""
 }
 
 func describeProbe(h deployspec.Health) string {
@@ -146,6 +166,9 @@ func (e *Engine) probe(ctx context.Context, dc *Context, containerID string) err
 
 	ip := info.IPOn(dc.Settings.Network)
 	if ip == "" {
+		if info.State.Restarting {
+			return fmt.Errorf("container is restarting after exiting with code %d", info.State.ExitCode)
+		}
 		return fmt.Errorf("container has no address on the %q network yet", dc.Settings.Network)
 	}
 	port := h.Port
