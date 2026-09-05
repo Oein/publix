@@ -2,6 +2,8 @@
   import { api, setUnauthorizedHandler, eventStream } from './lib/api.js';
   import { route, navigate } from './lib/router.js';
   import { notify } from './lib/toast.js';
+  import { t } from './lib/i18n.svelte.js';
+  import Appearance from './lib/Appearance.svelte';
   import Toasts from './lib/Toasts.svelte';
   import Login from './routes/Login.svelte';
   import Projects from './routes/Projects.svelte';
@@ -55,9 +57,9 @@
   }
 
   const nav = [
-    { path: '/', label: 'Projects', match: (p) => p === '/' || p.startsWith('/projects') },
-    { path: '/import', label: 'Import', match: (p) => p.startsWith('/import') },
-    { path: '/settings', label: 'Settings', match: (p) => p.startsWith('/settings') },
+    { key: 'projects', path: '/', match: (p) => p === '/' || p.startsWith('/projects') },
+    { key: 'import', path: '/import', match: (p) => p.startsWith('/import') },
+    { key: 'settings', path: '/settings', match: (p) => p.startsWith('/settings') },
   ];
 </script>
 
@@ -87,11 +89,12 @@
 
       <nav>
         {#each nav as item}
-          <a href="#{item.path}" class:active={item.match(current.path)}>{item.label}</a>
+          <a href="#{item.path}" class:active={item.match(current.path)}>{t(`nav.${item.key}`)}</a>
         {/each}
       </nav>
 
-      <button class="signout" onclick={logout}>Sign out</button>
+      <Appearance />
+      <button class="signout" onclick={logout}>{t('app.signOut')}</button>
     </header>
 
     <main>

@@ -1,4 +1,6 @@
 <script>
+  import { t } from './i18n.svelte.js';
+
   /** A dialog. Escape and backdrop both close it; focus is trapped inside. */
   let { title, wide = false, onclose, children, footer = undefined } = $props();
 
@@ -46,7 +48,7 @@
   <div class="dialog" class:wide bind:this={dialog} role="dialog" aria-modal="true" aria-label={title}>
     <header>
       <h2>{title}</h2>
-      <button class="close" onclick={onclose} aria-label="Close">×</button>
+      <button class="close" onclick={onclose} aria-label={t('common.close')}>×</button>
     </header>
     <div class="body">{@render children()}</div>
     {#if footer}<footer>{@render footer()}</footer>{/if}

@@ -2,6 +2,7 @@
   import { api } from '../lib/api.js';
   import { age, statusTone, statusLabel, subject, isActive } from '../lib/format.js';
   import { notify } from '../lib/toast.js';
+  import { t } from '../lib/i18n.svelte.js';
   import Badge from '../lib/Badge.svelte';
   import Button from '../lib/Button.svelte';
   import Empty from '../lib/Empty.svelte';
@@ -32,7 +33,7 @@
     deploying = { ...deploying, [project.id]: true };
     try {
       await api.projects.deploy(project.id, {});
-      notify.success(`Deploying ${project.name}`);
+      notify.success(t('projects.deployingToast', { name: project.name }));
       load();
     } catch (err) {
       notify.error(err);
@@ -44,16 +45,16 @@
 
 <div class="spread head">
   <div>
-    <h1>Projects</h1>
+    <h1>{t('projects.title')}</h1>
     <p class="muted small">
       {#if projects?.length}
-        {projects.length} project{projects.length === 1 ? '' : 's'} on this server
+        {t('projects.count', { count: projects.length })}
       {:else}
-        Everything deployed on this server
+        {t('projects.subtitle')}
       {/if}
     </p>
   </div>
-  <a href="#/import"><Button variant="primary">Import from GitHub</Button></a>
+  <a href="#/import"><Button variant="primary">{t('projects.importCta')}</Button></a>
 </div>
 
 {#if projects === null}
@@ -63,10 +64,10 @@
 {:else if projects.length === 0}
   <div class="panel">
     <Empty
-      title="No projects yet"
-      description="Import a repository from GitHub and publix will detect how to build it, deploy it, and give it a URL."
+      title={t('projects.emptyTitle')}
+      description={t('projects.emptyDesc')}
     >
-      <a href="#/import"><Button variant="primary">Import from GitHub</Button></a>
+      <a href="#/import"><Button variant="primary">{t('projects.importCta')}</Button></a>
     </Empty>
   </div>
 {:else}
@@ -79,24 +80,24 @@
             <h2 class="truncate">{project.name}</h2>
           </div>
           {#if project.building}
-            <Badge tone="busy" dot>Building</Badge>
+            <Badge tone="busy" dot>{t('status.building')}</Badge>
           {:else if project.live}
             <Badge tone={statusTone(project.live.status)} dot>
               {statusLabel(project.live.status)}
             </Badge>
           {:else if project.paused}
-            <Badge tone="warn">Paused</Badge>
+            <Badge tone="warn">{t('status.paused')}</Badge>
           {:else if project.latest?.status === 'failed'}
-            <Badge tone="bad" dot>Failed</Badge>
+            <Badge tone="bad" dot>{t('status.failed')}</Badge>
           {:else}
-            <Badge tone="muted">Not deployed</Badge>
+            <Badge tone="muted">{t('status.notDeployed')}</Badge>
           {/if}
         </div>
 
         {#if project.url}
           <span class="url truncate">{project.url.replace(/^https?:\/\//, '')}</span>
         {:else}
-          <span class="url faint">No domain configured</span>
+          <span class="url faint">{t('projects.noDomain')}</span>
         {/if}
 
         <div class="meta">
@@ -107,7 +108,7 @@
             <span class="sep">·</span>
             <span class="nowrap">{project.repo.branch}</span>
           {:else}
-            <span class="faint">No repository</span>
+            <span class="faint">{t('projects.noRepo')}</span>
           {/if}
           {#if project.frameworkName}
             <span class="sep">·</span><span class="nowrap">{project.frameworkName}</span>
@@ -121,15 +122,15 @@
               {#if d.short}<code>{d.short}</code>{/if}
               <span class="truncate" class:err={!project.live && d.status === 'failed'}>
                 {#if !project.live && d.status === 'failed'}
-                  {d.error?.split('\n')[0] || 'Deployment failed'}
+                  {d.error?.split('\n')[0] || t('projects.deployFailed')}
                 {:else}
-                  {subject(d.message) || 'No commit message'}
+                  {subject(d.message) || t('projects.noCommitMessage')}
                 {/if}
               </span>
             </span>
             <span class="faint nowrap">{age(d.finishedAt ?? d.queuedAt)}</span>
           {:else}
-            <span class="faint">Never deployed</span>
+            <span class="faint">{t('projects.neverDeployed')}</span>
           {/if}
         </div>
 
@@ -140,7 +141,7 @@
             disabled={!project.repo && !project.live}
             onclick={(e) => deploy(project, e)}
           >
-            {project.building ? 'Deploying' : 'Deploy'}
+            {project.building ? t('status.deploying') : t('projects.deploy')}
           </Button>
         </div>
       </a>

@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Oein/publix/internal/github"
 )
 
 func TestPasswordHashRoundTrip(t *testing.T) {
@@ -82,5 +84,38 @@ func TestLoginLimiter(t *testing.T) {
 	l.reset("1.2.3.4")
 	if !l.allow("1.2.3.4") {
 		t.Error("reset did not clear the counter")
+	}
+}
+
+// A GitHub App's webhook lives on the App, so publix must be able to tell
+// whether the App already delivers here. Getting this wrong either
+// duplicates every push or silently stops deploying them.
+func TestAppDeliversWebhooks(t *testing.T) {
+	const want = "https://publix.example.com/api/webhooks/github"
+
+	app := func(url string, active bool) *github.AppInfo {
+		a := &github.AppInfo{}
+		a.HookAttributes.URL = url
+		a.HookAttributes.Active = active
+		return a
+	}
+
+	cases := []struct {
+		name string
+		app  *github.AppInfo
+		want bool
+	}{
+		{"exact match", app(want, true), true},
+		{"trailing slash", app(want+"/", true), true},
+		{"case difference in host", app("https://Publix.Example.com/api/webhooks/github", true), true},
+		{"configured but inactive", app(want, false), false},
+		{"points somewhere else", app("https://other.example.com/api/webhooks/github", true), false},
+		{"no webhook configured", app("", true), false},
+		{"not an app", nil, false},
+	}
+	for _, tc := range cases {
+		if got := appDeliversWebhooks(tc.app, want); got != tc.want {
+			t.Errorf("%s: appDeliversWebhooks = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }

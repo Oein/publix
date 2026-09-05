@@ -6,6 +6,7 @@
   import Field from '../lib/Field.svelte';
   import Badge from '../lib/Badge.svelte';
   import FrameworkIcon from '../lib/FrameworkIcon.svelte';
+  import { t, tparts } from '../lib/i18n.svelte.js';
 
   /**
    * The import dialog.
@@ -82,14 +83,14 @@
   }
 </script>
 
-<Modal title="Import {repo.full_name}" wide {onclose}>
+<Modal title={t('id.title', { repo: repo.full_name })} wide {onclose}>
   {#if inspectError}
     <div class="notice bad">
-      <strong>Could not inspect this repository</strong>
+      <strong>{t('id.inspectFailed')}</strong>
       <p class="small muted">{inspectError}</p>
     </div>
   {:else if inspection === null}
-    <div class="inspecting"><span class="spinner"></span> Inspecting the repository…</div>
+    <div class="inspecting"><span class="spinner"></span> {t('id.inspecting')}</div>
   {:else}
     <div class="detected">
       <div class="row">
@@ -101,13 +102,14 @@
         <div class="col" style="gap:1px">
           <strong class="small">{inspection.detection.name || inspection.detection.kind}</strong>
           {#if inspection.hasSpec}
-            <span class="small muted">Using the repository's own <code>{inspection.specPath}</code></span>
-          {:else if inspection.detection.generated}
             <span class="small muted">
-              No Dockerfile needed — publix builds this with a generated one
+              {#each tparts('id.usingSpec') as part}{#if part.slot}<code>{inspection.specPath}</code
+                >{:else}{part.text}{/if}{/each}
             </span>
+          {:else if inspection.detection.generated}
+            <span class="small muted">{t('id.generated')}</span>
           {:else}
-            <span class="small muted">Detected automatically</span>
+            <span class="small muted">{t('id.detected')}</span>
           {/if}
         </div>
         {#if inspection.detection.configFile}
@@ -117,30 +119,40 @@
       </div>
 
       <dl>
-        <div><dt>Build</dt><dd>{inspection.detection.kind}</dd></div>
+        <div><dt>{t('id.build')}</dt><dd>{inspection.detection.kind}</dd></div>
         {#if inspection.detection.compose}
-          <div><dt>Compose file</dt><dd><code>{inspection.detection.compose}</code></dd></div>
+          <div>
+            <dt>{t('id.compose')}</dt><dd><code>{inspection.detection.compose}</code></dd>
+          </div>
         {/if}
         {#if inspection.detection.dockerfile}
-          <div><dt>Dockerfile</dt><dd><code>{inspection.detection.dockerfile}</code></dd></div>
+          <div>
+            <dt>{t('id.dockerfile')}</dt><dd><code>{inspection.detection.dockerfile}</code></dd>
+          </div>
         {/if}
         {#if inspection.detection.install}
-          <div><dt>Install</dt><dd><code>{inspection.detection.install}</code></dd></div>
+          <div>
+            <dt>{t('id.install')}</dt><dd><code>{inspection.detection.install}</code></dd>
+          </div>
         {/if}
         {#if inspection.detection.command}
-          <div><dt>Build</dt><dd><code>{inspection.detection.command}</code></dd></div>
+          <div>
+            <dt>{t('id.build')}</dt><dd><code>{inspection.detection.command}</code></dd>
+          </div>
         {/if}
         {#if inspection.detection.start}
-          <div><dt>Start</dt><dd><code>{inspection.detection.start}</code></dd></div>
+          <div><dt>{t('id.start')}</dt><dd><code>{inspection.detection.start}</code></dd></div>
         {/if}
         {#if inspection.detection.standalone}
-          <div><dt>Output</dt><dd>standalone (small runtime image)</dd></div>
+          <div><dt>{t('id.output')}</dt><dd>{t('id.standalone')}</dd></div>
         {/if}
         {#if inspection.detection.output}
-          <div><dt>Output</dt><dd><code>{inspection.detection.output}</code></dd></div>
+          <div>
+            <dt>{t('id.output')}</dt><dd><code>{inspection.detection.output}</code></dd>
+          </div>
         {/if}
         {#if inspection.detection.port}
-          <div><dt>Port</dt><dd>{inspection.detection.port}</dd></div>
+          <div><dt>{t('id.port')}</dt><dd>{inspection.detection.port}</dd></div>
         {/if}
       </dl>
 
@@ -152,11 +164,11 @@
 
   <div class="form">
     <div class="two">
-      <Field label="Project name" required>
+      <Field label={t('id.name')} required>
         {#snippet children(id)}<input {id} bind:value={name} autocomplete="off" />{/snippet}
       </Field>
 
-      <Field label="Branch" hint="Pushes to this branch deploy to production.">
+      <Field label={t('id.branch')} hint={t('id.branchHint')}>
         {#snippet children(id)}
           <select {id} bind:value={branch}>
             {#each inspection?.branches?.length ? inspection.branches : [branch] as b}
@@ -168,13 +180,13 @@
     </div>
 
     <div class="two">
-      <Field label="Root directory" hint="Leave empty unless this is a monorepo.">
+      <Field label={t('id.rootDir')} hint={t('id.rootDirHint')}>
         {#snippet children(id)}
           <input {id} bind:value={rootDir} placeholder="apps/web" autocomplete="off" />
         {/snippet}
       </Field>
 
-      <Field label="Domains" hint="Optional. Space or comma separated.">
+      <Field label={t('id.domains')} hint={t('id.domainsHint')}>
         {#snippet children(id)}
           <input {id} bind:value={domains} placeholder="app.example.com" autocomplete="off" />
         {/snippet}
@@ -184,16 +196,16 @@
     <label class="check">
       <input type="checkbox" bind:checked={autoDeploy} />
       <span>
-        <strong>Deploy on every push</strong>
-        <span class="small muted">Registers a webhook on the repository.</span>
+        <strong>{t('id.autoDeploy')}</strong>
+        <span class="small muted">{t('id.autoDeployHint')}</span>
       </span>
     </label>
 
     <label class="check">
       <input type="checkbox" bind:checked={deployNow} />
       <span>
-        <strong>Deploy immediately</strong>
-        <span class="small muted">Starts the first build as soon as the project is created.</span>
+        <strong>{t('id.deployNow')}</strong>
+        <span class="small muted">{t('id.deployNowHint')}</span>
       </span>
     </label>
 
@@ -201,10 +213,8 @@
       <label class="check">
         <input type="checkbox" bind:checked={writeSpec} />
         <span>
-          <strong>Commit deployment.yaml to the repository</strong>
-          <span class="small muted">
-            Makes this configuration part of the repo, so it deploys the same way anywhere.
-          </span>
+          <strong>{t('id.writeSpec')}</strong>
+          <span class="small muted">{t('id.writeSpecHint')}</span>
         </span>
       </label>
     {/if}
@@ -213,7 +223,7 @@
       <div class="specbox">
         <button class="disclose" onclick={() => (showSpec = !showSpec)}>
           {showSpec ? '▾' : '▸'}
-          {inspection?.hasSpec ? "Repository's deployment.yaml" : 'Suggested deployment.yaml'}
+          {inspection?.hasSpec ? t('id.repoSpec') : t('id.suggestedSpec')}
         </button>
         {#if showSpec}
           {#if inspection?.hasSpec}
@@ -227,14 +237,14 @@
   </div>
 
   {#snippet footer()}
-    <Button variant="ghost" onclick={onclose}>Cancel</Button>
+    <Button variant="ghost" onclick={onclose}>{t('common.cancel')}</Button>
     <Button
       variant="primary"
       pending={importing}
       disabled={!name.trim() || inspection === null}
       onclick={submit}
     >
-      {deployNow ? 'Import and deploy' : 'Import'}
+      {deployNow ? t('id.importAndDeploy') : t('id.import')}
     </Button>
   {/snippet}
 </Modal>

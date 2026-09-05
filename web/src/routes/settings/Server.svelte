@@ -5,6 +5,7 @@
   import Card from '../../lib/Card.svelte';
   import Field from '../../lib/Field.svelte';
   import Badge from '../../lib/Badge.svelte';
+  import { t } from '../../lib/i18n.svelte.js';
 
   let { revision } = $props();
 
@@ -56,7 +57,7 @@
         keepDeployments: Number(form.keepDeployments),
         buildConcurrency: Number(form.buildConcurrency),
       });
-      notify.success('Settings saved — routing was rewritten.');
+      notify.success(t('server.saved'));
       load();
     } catch (err) {
       notify.error(err);
@@ -67,63 +68,57 @@
 </script>
 
 {#if system}
-  <Card title="Status">
+  <Card title={t('server.status')}>
     <div class="status">
       <div class="item">
-        <span class="small muted">Docker</span>
+        <span class="small muted">{t('server.docker')}</span>
         {#if system.docker?.ok}
           <Badge tone="good" dot>{system.docker.version}</Badge>
         {:else}
-          <Badge tone="bad" dot>unreachable</Badge>
+          <Badge tone="bad" dot>{t('server.unreachable')}</Badge>
         {/if}
         {#if system.docker?.error}<p class="small err">{system.docker.error}</p>{/if}
       </div>
 
       <div class="item">
-        <span class="small muted">Traefik config</span>
+        <span class="small muted">{t('server.traefikConfig')}</span>
         {#if system.traefik?.ok}
-          <Badge tone="good" dot>writable</Badge>
+          <Badge tone="good" dot>{t('server.writable')}</Badge>
         {:else}
-          <Badge tone="bad" dot>not writable</Badge>
+          <Badge tone="bad" dot>{t('server.notWritable')}</Badge>
         {/if}
         <code class="small truncate">{system.traefik?.file}</code>
         {#if system.traefik?.error}<p class="small err">{system.traefik.error}</p>{/if}
       </div>
 
       <div class="item">
-        <span class="small muted">Network</span>
+        <span class="small muted">{t('server.network')}</span>
         {#if system.network?.exists}
           <Badge tone="good" dot>{system.network.name}</Badge>
         {:else}
-          <Badge tone="warn" dot>created on first deploy</Badge>
+          <Badge tone="warn" dot>{t('server.networkPending')}</Badge>
         {/if}
       </div>
 
       <div class="item">
-        <span class="small muted">Projects</span>
-        <strong>{system.projects?.live ?? 0} live</strong>
-        <span class="small faint">of {system.projects?.total ?? 0}</span>
+        <span class="small muted">{t('server.projects')}</span>
+        <strong>{t('server.liveCount', { count: system.projects?.live ?? 0 })}</strong>
+        <span class="small faint">{t('server.ofTotal', { count: system.projects?.total ?? 0 })}</span>
       </div>
     </div>
   </Card>
 {/if}
 
 {#if settings}
-  <Card title="Addresses">
+  <Card title={t('server.addresses')}>
     <div class="form">
-      <Field
-        label="Apps domain"
-        hint="A wildcard domain, so every project gets a working URL before you configure one. With apps.example.com a project named blog is reachable at blog.apps.example.com. Point *.apps.example.com at this host."
-      >
+      <Field label={t('server.appsDomain')} hint={t('server.appsDomainHint')}>
         {#snippet children(id)}
           <input {id} bind:value={form.appsDomain} placeholder="apps.example.com" autocomplete="off" />
         {/snippet}
       </Field>
 
-      <Field
-        label="Public URL"
-        hint="Where this dashboard is reachable from the internet. GitHub webhooks are pointed here, so deploy-on-push needs it."
-      >
+      <Field label={t('server.publicUrl')} hint={t('server.publicUrlHint')}>
         {#snippet children(id)}
           <input {id} bind:value={form.publicUrl} placeholder="https://publix.example.com" autocomplete="off" />
         {/snippet}
@@ -131,64 +126,54 @@
     </div>
   </Card>
 
-  <Card title="Traefik">
+  <Card title={t('server.traefik')}>
     <div class="form">
-      <Field
-        label="Dynamic configuration directory"
-        hint="Traefik's file provider directory. publix owns exactly one file in it and leaves everything else alone."
-      >
+      <Field label={t('server.dynamicDir')} hint={t('server.dynamicDirHint')}>
         {#snippet children(id)}
           <input {id} bind:value={form.traefikDynamicDir} autocomplete="off" spellcheck="false" />
         {/snippet}
       </Field>
 
       <div class="two">
-        <Field label="Entrypoints" hint="Comma separated.">
+        <Field label={t('server.entrypoints')} hint={t('server.entrypointsHint')}>
           {#snippet children(id)}<input {id} bind:value={form.entryPoints} autocomplete="off" />{/snippet}
         </Field>
-        <Field label="Certificate resolver" hint="Your ACME resolver name. Empty disables TLS.">
+        <Field label={t('server.certResolver')} hint={t('server.certResolverHint')}>
           {#snippet children(id)}<input {id} bind:value={form.certResolver} autocomplete="off" />{/snippet}
         </Field>
       </div>
 
-      <Field label="Docker network" hint="Shared by Traefik and every project container.">
+      <Field label={t('server.dockerNetwork')} hint={t('server.dockerNetworkHint')}>
         {#snippet children(id)}<input {id} bind:value={form.network} autocomplete="off" />{/snippet}
       </Field>
     </div>
   </Card>
 
-  <Card title="Retention and builds">
+  <Card title={t('server.retention')}>
     <div class="three">
-      <Field
-        label="Images per project"
-        hint="Two keeps a one-step rollback instant. Older deployments rebuild from their commit."
-      >
+      <Field label={t('server.keepImages')} hint={t('server.keepImagesHint')}>
         {#snippet children(id)}<input {id} type="number" min="1" max="20" bind:value={form.keepImages} />{/snippet}
       </Field>
 
-      <Field label="Deployment records" hint="History depth. Metadata only — cheap to keep.">
+      <Field label={t('server.keepDeployments')} hint={t('server.keepDeploymentsHint')}>
         {#snippet children(id)}
           <input {id} type="number" min="1" max="500" bind:value={form.keepDeployments} />
         {/snippet}
       </Field>
 
-      <Field label="Concurrent builds" hint="Caps how many projects build at once.">
+      <Field label={t('server.buildConcurrency')} hint={t('server.buildConcurrencyHint')}>
         {#snippet children(id)}
           <input {id} type="number" min="1" max="16" bind:value={form.buildConcurrency} />
         {/snippet}
       </Field>
     </div>
 
-    <p class="muted small note">
-      Only one deployment per project stays running at a time. During a deploy the new generation
-      briefly runs alongside the old one so traffic can move without dropping a request, then the
-      old one is stopped.
-    </p>
+    <p class="muted small note">{t('server.retentionNote')}</p>
   </Card>
 
   <div class="save">
-    <Button variant="primary" pending={saving} onclick={save}>Save settings</Button>
-    <Button variant="ghost" onclick={load}>Reload</Button>
+    <Button variant="primary" pending={saving} onclick={save}>{t('server.save')}</Button>
+    <Button variant="ghost" onclick={load}>{t('common.reload')}</Button>
   </div>
 {/if}
 

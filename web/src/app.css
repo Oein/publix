@@ -23,6 +23,9 @@
   --accent: #157a4a;
   --accent-bg: #e6f4ec;
   --accent-text: #0f5c37;
+  /* What sits on top of --accent. It has to be declared per theme: the dark
+     palette's accent is a light green, and white text on it is unreadable. */
+  --accent-fg: #ffffff;
 
   --good: #157a4a;
   --good-bg: #e6f4ec;
@@ -43,8 +46,20 @@
   --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
 }
 
+/*
+ * Dark mode has two triggers, and the block below is written twice on
+ * purpose: CSS has no way to name a set of declarations and apply it in two
+ * places, and a preprocessor would be a build step for one duplicated block.
+ *
+ *   1. The OS asks for dark, and the user has not overridden it.
+ *   2. The user chose dark explicitly, whatever the OS says.
+ *
+ * The :not([data-theme='light']) guard is what lets an explicit light choice
+ * win over an OS that prefers dark.
+ */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
     --bg: #0e1013;
     --bg-raised: #16191e;
     --bg-sunken: #0a0c0f;
@@ -59,6 +74,7 @@
     --accent: #4ec98a;
     --accent-bg: #12291e;
     --accent-text: #6fd9a1;
+    --accent-fg: #08130c;
 
     --good: #4ec98a;
     --good-bg: #12291e;
@@ -72,6 +88,43 @@
     --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 4px 12px rgb(0 0 0 / 30%);
     --shadow-lg: 0 8px 32px rgb(0 0 0 / 55%);
   }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0e1013;
+  --bg-raised: #16191e;
+  --bg-sunken: #0a0c0f;
+  --bg-hover: #1d2127;
+  --border: #262b33;
+  --border-strong: #3a414b;
+
+  --text: #e8eaed;
+  --text-muted: #99a0aa;
+  --text-faint: #6c737d;
+
+  --accent: #4ec98a;
+  --accent-bg: #12291e;
+  --accent-text: #6fd9a1;
+  --accent-fg: #08130c;
+
+  --good: #4ec98a;
+  --good-bg: #12291e;
+  --bad: #f2837a;
+  --bad-bg: #2c1614;
+  --warn: #e0b355;
+  --warn-bg: #2b2211;
+  --busy: #6fa8e8;
+  --busy-bg: #14202f;
+
+  --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 4px 12px rgb(0 0 0 / 30%);
+  --shadow-lg: 0 8px 32px rgb(0 0 0 / 55%);
+}
+
+/* And an explicit light choice has to re-assert light, since the media
+   query above may have already switched color-scheme for form controls. */
+:root[data-theme='light'] {
+  color-scheme: light;
 }
 
 * {
@@ -106,26 +159,43 @@ h4 {
   letter-spacing: -0.011em;
 }
 
-h1 { font-size: 20px; }
-h2 { font-size: 16px; }
-h3 { font-size: 14px; }
+h1 {
+  font-size: 20px;
+}
+h2 {
+  font-size: 16px;
+}
+h3 {
+  font-size: 14px;
+}
 
-p { margin: 0 0 12px; }
-p:last-child { margin-bottom: 0; }
+p {
+  margin: 0 0 12px;
+}
+p:last-child {
+  margin-bottom: 0;
+}
 
 a {
   color: var(--accent-text);
   text-decoration: none;
 }
-a:hover { text-decoration: underline; }
+a:hover {
+  text-decoration: underline;
+}
 
-code, pre, .mono {
+code,
+pre,
+.mono {
   font-family: var(--mono);
   font-size: 12.5px;
   font-variant-ligatures: none;
 }
 
-button, input, select, textarea {
+button,
+input,
+select,
+textarea {
   font: inherit;
   color: inherit;
 }
@@ -143,19 +213,51 @@ button, input, select, textarea {
 }
 
 /* Utility layout classes used widely enough to be worth centralising. */
-.row { display: flex; align-items: center; gap: 8px; }
-.col { display: flex; flex-direction: column; gap: 8px; }
-.spread { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.grow { flex: 1; min-width: 0; }
-.wrap { flex-wrap: wrap; }
-.muted { color: var(--text-muted); }
-.faint { color: var(--text-faint); }
-.small { font-size: 12.5px; }
-.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nowrap { white-space: nowrap; }
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.spread {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+.wrap {
+  flex-wrap: wrap;
+}
+.muted {
+  color: var(--text-muted);
+}
+.faint {
+  color: var(--text-faint);
+}
+.small {
+  font-size: 12.5px;
+}
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nowrap {
+  white-space: nowrap;
+}
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

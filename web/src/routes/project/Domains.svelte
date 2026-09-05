@@ -3,6 +3,7 @@
   import { notify } from '../../lib/toast.js';
   import Button from '../../lib/Button.svelte';
   import Card from '../../lib/Card.svelte';
+  import { t } from '../../lib/i18n.svelte.js';
 
   let { project, onchange } = $props();
 
@@ -35,11 +36,11 @@
     const value = draft.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
     if (!value) return;
     if (!value.includes('.')) {
-      notify.error(`"${value}" does not look like a hostname.`);
+      notify.error(t('domains.notHostname', { value }));
       return;
     }
     if (domains.includes(value)) {
-      notify.error(`${value} is already listed.`);
+      notify.error(t('domains.alreadyListed', { value }));
       return;
     }
     domains = [...domains, value];
@@ -50,7 +51,7 @@
     saving = true;
     try {
       await api.projects.setDomains(project.id, domains);
-      notify.success('Domains updated — routing changed immediately.');
+      notify.success(t('domains.updated'));
       onchange();
     } catch (err) {
       notify.error(err);
@@ -60,7 +61,7 @@
   }
 </script>
 
-<Card title="Custom domains" description="Hostnames Traefik routes to this project.">
+<Card title={t('domains.title')} description={t('domains.desc')}>
   <div class="add">
     <input
       bind:value={draft}
@@ -69,14 +70,11 @@
       spellcheck="false"
       onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
     />
-    <Button onclick={add}>Add</Button>
+    <Button onclick={add}>{t('common.add')}</Button>
   </div>
 
   {#if domains.length === 0}
-    <p class="muted small">
-      No custom domains yet. Point an A record at this host, add the name here, and Traefik will
-      request a certificate for it on the next request.
-    </p>
+    <p class="muted small">{t('domains.emptyNote')}</p>
   {:else}
     <ul>
       {#each domains as domain (domain)}
@@ -87,7 +85,7 @@
           <button
             class="del"
             onclick={() => (domains = domains.filter((d) => d !== domain))}
-            aria-label="Remove {domain}"
+            aria-label={t('common.remove', { name: domain })}
           >×</button>
         </li>
       {/each}
@@ -96,15 +94,15 @@
 
   {#if changed}
     <div class="save">
-      <Button variant="primary" pending={saving} onclick={save}>Save domains</Button>
-      <Button variant="ghost" onclick={reset}>Discard</Button>
-      <span class="small muted">Takes effect at once — no redeploy needed.</span>
+      <Button variant="primary" pending={saving} onclick={save}>{t('domains.save')}</Button>
+      <Button variant="ghost" onclick={reset}>{t('common.discard')}</Button>
+      <span class="small muted">{t('domains.immediate')}</span>
     </div>
   {/if}
 </Card>
 
 {#if generated.length > 0}
-  <Card title="Generated address">
+  <Card title={t('domains.generatedTitle')}>
     <ul>
       {#each generated as host}
         <li>
@@ -114,18 +112,12 @@
         </li>
       {/each}
     </ul>
-    <p class="muted small note">
-      Every project gets one of these automatically from the server's apps domain, so it is
-      reachable before you configure anything. It follows the project's name.
-    </p>
+    <p class="muted small note">{t('domains.generatedNote')}</p>
   </Card>
 {/if}
 
-<Card title="Domains in deployment.yaml">
-  <p class="muted small">
-    Domains can also live in the repository, which keeps them versioned alongside the code. Both
-    sources are merged, and a rollback restores the domains that commit declared:
-  </p>
+<Card title={t('domains.specTitle')}>
+  <p class="muted small">{t('domains.specBlurb')}</p>
   <pre class="mono">{`domains:
   - app.example.com
 

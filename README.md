@@ -53,10 +53,12 @@ the previous deployment needs no build at all. Anything older is rebuilt
 from its commit. Either way, the deployment's recorded configuration comes
 back with it — its domains and settings, not just its code.
 
-**Shared storage is safe by construction.** You register host directories on
-the server; projects ask for them *by name*. Each project receives its own
-subdirectory, so two projects can mount the same volume and neither can read
-the other's files.
+**Storage is the server's decision, not the repository's.** You register host
+directories; projects ask for them *by name* and never see a path. A
+**project volume** gives each project its own subdirectory, so two projects
+can mount the same one and neither can read the other's files. A **shared
+volume** gives every project the same directory, for a dataset or a media
+library they genuinely share.
 
 ---
 
@@ -76,7 +78,9 @@ and ports 80 and 443 open. Then, in the dashboard:
 2. **Settings → GitHub** — connect a personal access token (classic tokens
    need `repo`; fine-grained ones need Contents, Metadata, Webhooks and
    Commit statuses) or a GitHub App, which is the right choice for an
-   organisation.
+   organisation. A GitHub App needs no Callback URL — publix has no OAuth
+   login — only the webhook URL and secret shown on that page. See
+   [docs/install.md](docs/install.md#connecting-a-github-app).
 3. **Import** — pick a repository. publix inspects it, shows you what it
    worked out, and deploys it.
 
@@ -219,25 +223,32 @@ Every container also receives `PORT`, `PUBLIX_COMMIT`, `PUBLIX_BRANCH`,
 Variables set in the dashboard override anything in `deployment.yaml`, so a
 repository can never override a production credential by editing a file.
 
-### Shared volumes
+### Volumes
 
-Register a volume on the server (`disk0` → `/mnt/data`), then:
+Register a volume on the server, then name it. A repository writes the same
+thing either way — which directory that resolves to is the server's choice:
 
 ```yaml
 volumes:
   - disk0                    # mounts at /shared/disk0
 
-  - name: uploads
-    mountPath: /var/uploads
-    readOnly: false
+  - name: media
+    mountPath: /var/media
+    readOnly: true
 
   - name: disk0
-    subPath: cache           # a subdirectory of this project's own area
+    subPath: cache           # a subdirectory of what this project gets
 ```
 
-A project with ID `abcd1234` mounting `disk0` gets `/mnt/data/abcd1234` at
-`/shared/disk0`. The project ID never changes, even if you rename the
-project, so renaming can never orphan or expose its data.
+| Kind | A project mounting it gets | For |
+| --- | --- | --- |
+| **Project volume** | `<path>/<project-id>` | its own uploads, cache, database |
+| **Shared volume** | `<path>` itself | a dataset or media library several projects share |
+
+A project volume is named after the project ID, which never changes even if
+you rename the project, so renaming can never orphan or expose its data. A
+shared volume has no isolation at all — that is what it is for, and why it
+is never the default.
 
 ### Release
 
@@ -406,6 +417,26 @@ make dev         # run the server with a live-reloading dashboard
 
 The dashboard is a Svelte 5 app compiled into the Go binary, so a build
 produces one self-contained file with no assets to deploy alongside it.
+
+### Appearance and language
+
+The button beside **Sign out** sets the theme (system, light or dark) and
+the language (English or Korean). Both are per-browser preferences kept in
+`localStorage`, not server settings, so two people using the same publix
+see it their own way. The defaults follow the machine: the OS colour scheme,
+and `navigator.languages` for the language.
+
+To add a language, copy `web/src/lib/locales/en.js`, translate the values,
+and add it to `CATALOGS` and `LANGUAGES` in `web/src/lib/i18n.svelte.js`.
+A key missing from a translation falls back to English rather than rendering
+blank, and `TestLocaleCatalogsHaveTheSameKeys` fails on a catalogue that has
+drifted. Dates, relative times and numbers come from `Intl`, so they follow
+the chosen language without a catalogue entry.
+
+Messages the server produces — API errors, deploy failures, build output —
+stay in English. Translating them would mean an error-code protocol running
+through the whole Go codebase, and the build output is the toolchain's, not
+publix's.
 
 ## Requirements
 

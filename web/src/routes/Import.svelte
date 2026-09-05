@@ -7,6 +7,7 @@
   import Button from '../lib/Button.svelte';
   import Empty from '../lib/Empty.svelte';
   import ImportDialog from './ImportDialog.svelte';
+  import { t, tparts } from '../lib/i18n.svelte.js';
 
   let { revision } = $props();
 
@@ -53,16 +54,16 @@
   function imported(result) {
     selected = null;
     for (const warning of result.warnings ?? []) notify.error(warning);
-    notify.success(`Imported ${result.project.name}`);
+    notify.success(t('import.imported', { name: result.project.name }));
     navigate(`/projects/${result.project.slug}`);
   }
 </script>
 
 <div class="head">
-  <h1>Import a repository</h1>
+  <h1>{t('import.title')}</h1>
   <p class="muted small">
-    publix reads the repository, works out how to build it, and deploys it. If it has a
-    <code>deployment.yaml</code> that is used as-is; otherwise one is suggested for you.
+    {#each tparts('import.blurb') as part}{#if part.slot}<code>deployment.yaml</code
+      >{:else}{part.text}{/if}{/each}
   </p>
 </div>
 
@@ -71,31 +72,31 @@
 {:else if !status.configured}
   <div class="panel">
     <Empty
-      title="GitHub is not connected"
-      description="Connect a personal access token or a GitHub App and your repositories will appear here, ready to import in one click."
+      title={t('import.notConnectedTitle')}
+      description={t('import.notConnectedDesc')}
     >
-      <a href="#/settings/github"><Button variant="primary">Connect GitHub</Button></a>
+      <a href="#/settings/github"><Button variant="primary">{t('import.connect')}</Button></a>
     </Empty>
   </div>
 {:else if status.error}
   <div class="panel error-panel">
-    <strong>GitHub returned an error</strong>
+    <strong>{t('import.ghError')}</strong>
     <p class="muted small">{status.error}</p>
-    <a href="#/settings/github"><Button size="sm">Check GitHub settings</Button></a>
+    <a href="#/settings/github"><Button size="sm">{t('import.checkSettings')}</Button></a>
   </div>
 {:else}
   <div class="toolbar">
     <input
       class="search"
       type="search"
-      placeholder="Search repositories…"
+      placeholder={t('import.search')}
       bind:value={query}
       autocomplete="off"
     />
     <span class="small muted nowrap">
-      {#if status.login}Connected as <strong>{status.login}</strong>{/if}
+      {#if status.login}{t('import.connectedAs')} <strong>{status.login}</strong>{/if}
     </span>
-    <Button size="sm" onclick={loadRepos}>Refresh</Button>
+    <Button size="sm" onclick={loadRepos}>{t('common.refresh')}</Button>
   </div>
 
   {#if repos === null}
@@ -105,15 +106,15 @@
   {:else if repos.length === 0}
     <div class="panel">
       <Empty
-        title="No repositories found"
-        description="The connected credentials cannot see any repositories. A fine-grained token needs explicit repository access; a GitHub App needs to be installed on the account."
+        title={t('import.noReposTitle')}
+        description={t('import.noReposDesc')}
       >
-        <a href="#/settings/github"><Button size="sm">Review GitHub settings</Button></a>
+        <a href="#/settings/github"><Button size="sm">{t('import.reviewSettings')}</Button></a>
       </Empty>
     </div>
   {:else if filtered.length === 0}
     <div class="panel">
-      <Empty title="Nothing matches “{query}”" description="Try a different search." />
+      <Empty title={t('import.noMatchTitle', { query })} description={t('import.noMatchDesc')} />
     </div>
   {:else}
     <ul class="list">
@@ -122,8 +123,8 @@
           <div class="grow">
             <div class="row">
               <span class="name truncate">{repo.full_name}</span>
-              {#if repo.private}<Badge tone="muted">Private</Badge>{/if}
-              {#if repo.archived}<Badge tone="warn">Archived</Badge>{/if}
+              {#if repo.private}<Badge tone="muted">{t('import.private')}</Badge>{/if}
+              {#if repo.archived}<Badge tone="warn">{t('import.archived')}</Badge>{/if}
             </div>
             {#if repo.description}
               <p class="muted small truncate desc">{repo.description}</p>
@@ -132,14 +133,18 @@
               {#if repo.language}<span>{repo.language}</span><span>·</span>{/if}
               <span>{repo.default_branch}</span>
               <span>·</span>
-              <span>updated {age(repo.pushed_at)}</span>
+              <span>{t('import.updated', { age: age(repo.pushed_at) })}</span>
             </div>
           </div>
 
           {#if repo.imported}
-            <a href="#/projects/{repo.projectId}"><Button size="sm">Open project</Button></a>
+            <a href="#/projects/{repo.projectId}">
+              <Button size="sm">{t('import.openProject')}</Button>
+            </a>
           {:else}
-            <Button size="sm" variant="primary" onclick={() => (selected = repo)}>Import</Button>
+            <Button size="sm" variant="primary" onclick={() => (selected = repo)}>
+              {t('import.import')}
+            </Button>
           {/if}
         </li>
       {/each}

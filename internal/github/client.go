@@ -353,3 +353,62 @@ func firstNonEmpty(vals ...string) string {
 	}
 	return ""
 }
+
+// AppInfo describes the GitHub App itself, as opposed to an installation of
+// it. Its hook attributes are what publix needs: an App delivers webhooks
+// for every repository it is installed on, so when one is configured there
+// is no reason to also create a webhook on each repository — and every
+// reason not to, since GitHub would then deliver each push twice.
+type AppInfo struct {
+	ID      int64  `json:"id"`
+	Slug    string `json:"slug"`
+	Name    string `json:"name"`
+	HTMLURL string `json:"html_url"`
+	Owner   struct {
+		Login string `json:"login"`
+	} `json:"owner"`
+	HookAttributes struct {
+		URL    string `json:"url"`
+		Active bool   `json:"active"`
+	} `json:"hook_attributes"`
+}
+
+// App returns the App's own metadata. The second result is false when
+// publix is authenticated with a personal access token rather than an App,
+// in which case there is no App to describe.
+//
+// This is one of the few endpoints that needs the App JWT rather than an
+// installation token: it describes the App, which no installation owns.
+func (c *Client) App(ctx context.Context) (*AppInfo, bool, error) {
+	a, ok := c.auth.(*appAuth)
+	if !ok {
+		return nil, false, nil
+	}
+
+	jwt, err := a.appJWT()
+	if err != nil {
+		return nil, true, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/app", nil)
+	if err != nil {
+		return nil, true, err
+	}
+	req.Header.Set("Authorization", "Bearer "+jwt)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "publix")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, true, fmt.Errorf("calling GitHub: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, true, apiError(resp, "GET /app")
+	}
+
+	var info AppInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return nil, true, err
+	}
+	return &info, true, nil
+}

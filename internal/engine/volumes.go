@@ -10,11 +10,13 @@ import (
 	"github.com/Oein/publix/internal/store"
 )
 
-// Bind is one resolved shared-volume mount.
+// Bind is one resolved volume mount.
 type Bind struct {
 	// Volume is the server-registered volume this came from.
 	Volume string
-	// HostPath is the project's own directory on that volume.
+	// Shared reports whether every project sees this same directory.
+	Shared bool
+	// HostPath is the directory this project mounts from that volume.
 	HostPath string
 	// MountPath is where it appears inside the container.
 	MountPath string
@@ -33,12 +35,13 @@ func (b Bind) String() string {
 }
 
 // resolveVolumes turns the project's declared volume names into concrete
-// host bind mounts, creating each project directory on the way.
+// host bind mounts, creating each directory on the way.
 //
-// The isolation rule is enforced here and nowhere else: a project may name a
-// volume, never a path. What it gets is <volume.Path>/<project.ID>. Two
-// projects mounting "disk0" therefore land in different directories and
-// cannot see each other's data.
+// One rule is enforced here and nowhere else: a project may name a volume,
+// never a path. Which directory that name resolves to is the server's
+// decision, and it depends on the volume's scope — a project-scoped volume
+// gives this project its own directory, a shared one gives every project
+// the same directory. A repository cannot influence either way.
 func (e *Engine) resolveVolumes(dc *Context) ([]Bind, error) {
 	if dc.Spec == nil {
 		return nil, nil
@@ -54,7 +57,7 @@ func (e *Engine) resolveVolumes(dc *Context) ([]Bind, error) {
 			continue
 		}
 
-		hostDir, err := sv.EnsureProjectDir(dc.Project.ID)
+		hostDir, err := sv.EnsureDir(dc.Project.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -72,6 +75,7 @@ func (e *Engine) resolveVolumes(dc *Context) ([]Bind, error) {
 
 		binds = append(binds, Bind{
 			Volume:    v.Name,
+			Shared:    sv.Shared(),
 			HostPath:  hostDir,
 			MountPath: mount,
 			// A volume the operator marked read-only stays read-only no
@@ -83,15 +87,12 @@ func (e *Engine) resolveVolumes(dc *Context) ([]Bind, error) {
 
 	if len(missing) > 0 {
 		sort.Strings(missing)
-		available := make([]string, 0, len(set.SharedVolumes))
-		for _, sv := range set.SharedVolumes {
-			available = append(available, sv.Name)
-		}
-		hint := "no shared volumes are registered on this server"
+		available := set.VolumeNames()
+		hint := "no volumes are registered on this server"
 		if len(available) > 0 {
 			hint = "registered volumes are: " + strings.Join(available, ", ")
 		}
-		return nil, fmt.Errorf("deployment.yaml asks for shared volume(s) %s, but %s\n\nRegister them under Settings → Shared volumes, or remove them from deployment.yaml.",
+		return nil, fmt.Errorf("deployment.yaml asks for volume(s) %s, but %s\n\nRegister them under Settings → Volumes, or remove them from deployment.yaml.",
 			strings.Join(missing, ", "), hint)
 	}
 

@@ -2,6 +2,7 @@
   import { api } from '../../lib/api.js';
   import { age, exact, duration, bytes, subject, statusTone, statusLabel } from '../../lib/format.js';
   import { notify } from '../../lib/toast.js';
+  import { t, tparts } from '../../lib/i18n.svelte.js';
   import Badge from '../../lib/Badge.svelte';
   import Card from '../../lib/Card.svelte';
   import Empty from '../../lib/Empty.svelte';
@@ -36,50 +37,49 @@
 </script>
 
 <div class="grid">
-  <Card title="Live deployment">
+  <Card title={t('overview.live')}>
     {#if !live}
-      <Empty
-        title="Nothing deployed yet"
-        description="Deploy this project and its containers will appear here."
-      />
+      <Empty title={t('overview.emptyTitle')} description={t('overview.emptyDesc')} />
     {:else}
       <dl>
         <div>
-          <dt>Status</dt>
+          <dt>{t('overview.status')}</dt>
           <dd><Badge tone={statusTone(live.status)} dot>{statusLabel(live.status)}</Badge></dd>
         </div>
         <div>
-          <dt>Commit</dt>
+          <dt>{t('overview.commit')}</dt>
           <dd>
             {#if live.short}
               <code>{live.short}</code>
               <span class="muted truncate">{subject(live.message)}</span>
             {:else}
-              <span class="faint">Not from a commit</span>
+              <span class="faint">{t('overview.notFromCommit')}</span>
             {/if}
           </dd>
         </div>
         {#if live.author}
-          <div><dt>Author</dt><dd>{live.author}</dd></div>
+          <div><dt>{t('overview.author')}</dt><dd>{live.author}</dd></div>
         {/if}
-        <div><dt>Branch</dt><dd>{live.branch || '—'}</dd></div>
-        <div><dt>Trigger</dt><dd>{live.trigger}</dd></div>
+        <div><dt>{t('overview.branch')}</dt><dd>{live.branch || '—'}</dd></div>
+        <div><dt>{t('overview.trigger')}</dt><dd>{live.trigger}</dd></div>
         <div>
-          <dt>Deployed</dt>
+          <dt>{t('overview.deployed')}</dt>
           <dd title={exact(live.finishedAt)}>
             {age(live.finishedAt)}
-            <span class="faint">· took {duration(live.startedAt, live.finishedAt)}</span>
+            <span class="faint">
+              · {t('overview.took', { time: duration(live.startedAt, live.finishedAt) })}
+            </span>
           </dd>
         </div>
-        <div><dt>Build</dt><dd>{live.kind || '—'}</dd></div>
+        <div><dt>{t('overview.build')}</dt><dd>{live.kind || '—'}</dd></div>
         {#if live.image}
-          <div><dt>Image</dt><dd><code class="truncate">{live.image}</code></dd></div>
+          <div><dt>{t('overview.image')}</dt><dd><code class="truncate">{live.image}</code></dd></div>
         {/if}
       </dl>
     {/if}
   </Card>
 
-  <Card title="Addresses" description="Every hostname routed to this project.">
+  <Card title={t('overview.addresses')} description={t('overview.addressesDesc')}>
     {#if project.hosts?.length}
       <ul class="hosts">
         {#each project.hosts as host}
@@ -89,15 +89,12 @@
         {/each}
       </ul>
     {:else}
-      <p class="muted small">
-        No hostname yet. Add one under Domains, or set an apps domain in Settings and every
-        project gets one automatically.
-      </p>
+      <p class="muted small">{t('overview.noHostname')}</p>
     {/if}
   </Card>
 
   {#if project.volumes?.length}
-    <Card title="Shared volumes" description="Server volumes this project mounts.">
+    <Card title={t('overview.volumes')} description={t('overview.volumesDesc')}>
       <ul class="vols">
         {#each project.volumes as vol}
           <li>
@@ -107,31 +104,31 @@
         {/each}
       </ul>
       <p class="muted small note">
-        Each project gets its own directory on a shared volume, named after its project ID
-        (<code>{project.id}</code>). Other projects cannot read it.
+        {#each tparts('overview.volumesNote') as part}{#if part.slot}<code>{project.id}</code
+          >{:else}{part.text}{/if}{/each}
       </p>
     </Card>
   {/if}
 
   <div class="full">
-  <Card title="Containers">
+  <Card title={t('overview.containers')}>
     {#snippet actions()}
-      <Button size="sm" variant="ghost" onclick={loadContainers}>Refresh</Button>
+      <Button size="sm" variant="ghost" onclick={loadContainers}>{t('common.refresh')}</Button>
     {/snippet}
 
     {#if containers === null}
-      <p class="muted small">Loading…</p>
+      <p class="muted small">{t('common.loading')}</p>
     {:else if containers.length === 0}
-      <p class="muted small">No containers are running for this project.</p>
+      <p class="muted small">{t('overview.noContainers')}</p>
     {:else}
       <div class="scroll">
       <table>
         <thead>
           <tr>
-            <th>Container</th>
-            <th>State</th>
-            <th class="num">CPU</th>
-            <th class="num">Memory</th>
+            <th>{t('overview.container')}</th>
+            <th>{t('overview.state')}</th>
+            <th class="num">{t('overview.cpu')}</th>
+            <th class="num">{t('overview.memory')}</th>
           </tr>
         </thead>
         <tbody>
@@ -153,6 +150,7 @@
             </tr>
           {/each}
         </tbody>
+      </table>
       </div>
     {/if}
   </Card>

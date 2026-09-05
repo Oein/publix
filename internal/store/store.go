@@ -49,15 +49,18 @@ func OpenAt(path string) (*Store, error) {
 
 	raw, err := os.ReadFile(path)
 	switch {
-	case os.IsNotExist(err):
+	case os.IsNotExist(err), err == nil && len(raw) == 0:
+		// A brand-new store still has to satisfy the invariants normalise
+		// establishes — notably a webhook secret, without which incoming
+		// webhooks are rejected and the settings page shows a blank field
+		// the operator is meant to paste into GitHub.
+		s.normalise()
 		if err := s.persist(); err != nil {
 			return nil, err
 		}
 		return s, nil
 	case err != nil:
 		return nil, err
-	case len(raw) == 0:
-		return s, nil
 	}
 
 	if err := json.Unmarshal(raw, &s.data); err != nil {
@@ -98,6 +101,25 @@ func (s *Store) normalise() {
 	}
 	if set.GitHub.WebhookSecret == "" {
 		set.GitHub.WebhookSecret = NewToken()
+	}
+
+	// Volumes gained a scope. Everything registered before that was
+	// per-project, so migrate rather than silently changing what an
+	// existing install's projects mount.
+	if len(set.LegacySharedVolumes) > 0 {
+		for _, v := range set.LegacySharedVolumes {
+			if _, exists := set.Volume(v.Name); exists {
+				continue
+			}
+			v.Scope = ScopeProject
+			set.Volumes = append(set.Volumes, v)
+		}
+		set.LegacySharedVolumes = nil
+	}
+	for i := range set.Volumes {
+		if set.Volumes[i].Scope == "" {
+			set.Volumes[i].Scope = ScopeProject
+		}
 	}
 	for _, p := range s.data.Projects {
 		if p.Slug == "" {
@@ -150,7 +172,7 @@ func (s *Store) Settings() Settings {
 	defer s.mu.RUnlock()
 	c := s.data.Settings
 	c.EntryPoints = append([]string(nil), c.EntryPoints...)
-	c.SharedVolumes = append([]SharedVolume(nil), c.SharedVolumes...)
+	c.Volumes = append([]Volume(nil), c.Volumes...)
 	return c
 }
 
