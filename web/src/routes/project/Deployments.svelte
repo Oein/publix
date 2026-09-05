@@ -3,6 +3,7 @@
   import { age, exact, duration, subject, statusTone, statusLabel } from '../../lib/format.js';
   import { notify } from '../../lib/toast.js';
   import { navigate } from '../../lib/router.js';
+  import { t } from '../../lib/i18n.svelte.js';
   import Badge from '../../lib/Badge.svelte';
   import Button from '../../lib/Button.svelte';
   import Empty from '../../lib/Empty.svelte';
@@ -30,7 +31,7 @@
     }
     try {
       const dep = await api.projects.rollback(project.id, rollbackTarget.id);
-      notify.success('Rolling back');
+      notify.success(t('deployments.rollingBack'));
       rollbackTarget = null;
       navigate(`/projects/${project.slug}/logs?deployment=${dep.id}`);
       onchange();
@@ -44,7 +45,7 @@
 
 {#if deployments.length === 0}
   <div class="panel">
-    <Empty title="No deployments yet" description="Deploy this project to see its history here." />
+    <Empty title={t('deployments.emptyTitle')} description={t('deployments.emptyDesc')} />
   </div>
 {:else}
   <ul class="list">
@@ -53,14 +54,14 @@
         <div class="left grow">
           <div class="row wrap">
             <Badge tone={statusTone(d.status)} dot>{statusLabel(d.status)}</Badge>
-            {#if d.id === project.current}<Badge tone="good">Current</Badge>{/if}
-            {#if d.rolledBackFrom}<Badge tone="warn">Rollback</Badge>{/if}
+            {#if d.id === project.current}<Badge tone="good">{t('status.current')}</Badge>{/if}
+            {#if d.rolledBackFrom}<Badge tone="warn">{t('status.rollback')}</Badge>{/if}
             <span class="num faint">#{d.number}</span>
           </div>
 
           <div class="msg truncate" title={d.message}>
             {#if d.short}<code>{d.short}</code>{/if}
-            {subject(d.message) || 'No commit message'}
+            {subject(d.message) || t('projects.noCommitMessage')}
           </div>
 
           <div class="meta small faint">
@@ -81,43 +82,36 @@
 
         <div class="right row">
           <a href="#/projects/{project.slug}/logs?deployment={d.id}">
-            <Button size="sm" variant="ghost">Logs</Button>
+            <Button size="sm" variant="ghost">{t('deployments.logs')}</Button>
           </a>
           {#if d.id !== project.current && d.status !== 'failed'}
-            <Button size="sm" onclick={() => openRollback(d)}>Roll back</Button>
+            <Button size="sm" onclick={() => openRollback(d)}>{t('deployments.rollback')}</Button>
           {/if}
         </div>
       </li>
     {/each}
   </ul>
 
-  <p class="muted small foot">
-    Only the live deployment keeps containers running. Rolling back to an earlier commit rebuilds
-    it — instantly when its image is still on disk, which publix keeps for the two most recent
-    deployments.
-  </p>
+  <p class="muted small foot">{t('deployments.note')}</p>
 {/if}
 
 {#if rollbackTarget}
   <Confirm
-    title="Roll back to #{rollbackTarget.number}?"
+    title={t('deployments.rollbackTitle', { number: rollbackTarget.number })}
     message={rollbackTarget.short
-      ? `This brings back commit ${rollbackTarget.short} and moves production traffic to it once it is healthy.`
-      : 'This brings that deployment back and moves production traffic to it once it is healthy.'}
-    confirmLabel="Roll back"
+      ? t('deployments.rollbackMessageCommit', { short: rollbackTarget.short })
+      : t('deployments.rollbackMessage')}
+    confirmLabel={t('deployments.rollback')}
     onconfirm={rollback}
     onclose={() => (rollbackTarget = null)}
   >
     {#snippet children()}
       {#if plan === null}
-        <p class="small muted">Checking what this will involve…</p>
+        <p class="small muted">{t('deployments.checking')}</p>
       {:else if plan.instant}
-        <p class="small ok">⚡ The image for this commit is still on disk — this will be fast.</p>
+        <p class="small ok">{t('deployments.instant')}</p>
       {:else if plan.rebuild}
-        <p class="small muted">
-          This commit's image has been pruned, so it will be rebuilt from source. The result is
-          the same; it just takes as long as a normal build.
-        </p>
+        <p class="small muted">{t('deployments.rebuild')}</p>
       {:else if !plan.possible}
         <p class="small err">{plan.reason}</p>
       {/if}

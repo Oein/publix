@@ -3,6 +3,7 @@
   import { navigate } from '../lib/router.js';
   import { notify } from '../lib/toast.js';
   import { statusTone, statusLabel, age, subject } from '../lib/format.js';
+  import { t, tparts } from '../lib/i18n.svelte.js';
   import Badge from '../lib/Badge.svelte';
   import Button from '../lib/Button.svelte';
   import Confirm from '../lib/Confirm.svelte';
@@ -40,20 +41,13 @@
     load();
   });
 
-  const tabs = [
-    { key: 'overview', label: 'Overview' },
-    { key: 'deployments', label: 'Deployments' },
-    { key: 'logs', label: 'Logs' },
-    { key: 'env', label: 'Environment' },
-    { key: 'domains', label: 'Domains' },
-    { key: 'settings', label: 'Settings' },
-  ];
+  const tabs = ['overview', 'deployments', 'logs', 'env', 'domains', 'settings'];
 
   async function deploy() {
     deploying = true;
     try {
       const dep = await api.projects.deploy(project.id, {});
-      notify.success('Deployment queued');
+      notify.success(t('project.queued'));
       navigate(`/projects/${project.slug}/logs?deployment=${dep.id}`);
       load();
     } catch (err) {
@@ -67,7 +61,7 @@
     try {
       const result = await api.projects.remove(project.id);
       for (const warning of result.warnings ?? []) notify.error(warning);
-      notify.success(`Deleted ${project.name}`);
+      notify.success(t('project.deleted', { name: project.name }));
       navigate('/');
     } catch (err) {
       notify.error(err);
@@ -77,9 +71,12 @@
 
 {#if missing}
   <div class="gone">
-    <h1>Project not found</h1>
-    <p class="muted">There is no project called <code>{id}</code> on this server.</p>
-    <a href="#/"><Button>Back to projects</Button></a>
+    <h1>{t('project.notFound')}</h1>
+    <p class="muted">
+      {#each tparts('project.notFoundBody') as part}{#if part.slot}<code>{id}</code
+        >{:else}{part.text}{/if}{/each}
+    </p>
+    <a href="#/"><Button>{t('project.back')}</Button></a>
   </div>
 {:else if project === null}
   <div class="ghost"></div>
@@ -90,13 +87,13 @@
         <FrameworkIcon framework={project.framework} title={project.frameworkName} size={24} />
         <h1>{project.name}</h1>
         {#if project.building}
-          <Badge tone="busy" dot>Building</Badge>
+          <Badge tone="busy" dot>{t('status.building')}</Badge>
         {:else if project.live}
           <Badge tone={statusTone(project.live.status)} dot>{statusLabel(project.live.status)}</Badge>
         {:else}
-          <Badge tone="muted">Not deployed</Badge>
+          <Badge tone="muted">{t('status.notDeployed')}</Badge>
         {/if}
-        {#if project.paused}<Badge tone="warn">Paused</Badge>{/if}
+        {#if project.paused}<Badge tone="warn">{t('status.paused')}</Badge>{/if}
       </div>
 
       <div class="sub small">
@@ -105,7 +102,7 @@
             {project.url.replace(/^https?:\/\//, '')} ↗
           </a>
         {:else}
-          <span class="faint">No domain yet</span>
+          <span class="faint">{t('project.noDomainYet')}</span>
         {/if}
         {#if project.frameworkName}
           <span class="sep">·</span>
@@ -139,18 +136,20 @@
     <div class="row">
       {#if project.building}
         <Button onclick={() => api.projects.cancel(project.id).then(load).catch(notify.error)}>
-          Cancel
+          {t('project.cancel')}
         </Button>
       {/if}
       <Button variant="primary" pending={deploying || project.building} onclick={deploy}>
-        Deploy
+        {t('project.deploy')}
       </Button>
     </div>
   </header>
 
   <nav class="tabs">
-    {#each tabs as t}
-      <a href="#/projects/{project.slug}/{t.key}" class:active={tab === t.key}>{t.label}</a>
+    {#each tabs as key}
+      <a href="#/projects/{project.slug}/{key}" class:active={tab === key}>
+        {t(`project.tab.${key}`)}
+      </a>
     {/each}
   </nav>
 
@@ -171,9 +170,9 @@
 
 {#if confirmDelete && project}
   <Confirm
-    title="Delete {project.name}?"
-    message="Its containers and images will be removed, and its GitHub webhook deleted. Data on shared volumes is kept."
-    confirmLabel="Delete project"
+    title={t('project.deleteTitle', { name: project.name })}
+    message={t('project.deleteMessage')}
+    confirmLabel={t('project.deleteConfirm')}
     confirmText={project.name}
     danger
     onconfirm={remove}

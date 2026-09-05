@@ -1,6 +1,8 @@
 <script>
   import { api } from '../lib/api.js';
   import Button from '../lib/Button.svelte';
+  import { t } from '../lib/i18n.svelte.js';
+  import Appearance from '../lib/Appearance.svelte';
 
   let { needsSetup, onauthenticated } = $props();
 
@@ -14,11 +16,11 @@
     error = '';
 
     if (needsSetup && password !== confirm) {
-      error = 'The two passwords do not match.';
+      error = t('login.mismatch');
       return;
     }
     if (needsSetup && password.length < 8) {
-      error = 'Choose a password of at least 8 characters.';
+      error = t('login.tooShort');
       return;
     }
 
@@ -41,6 +43,11 @@
 </script>
 
 <div class="page">
+  <!-- The topbar is not rendered yet, and someone setting up a server in a
+       language their browser did not advertise should not have to sign in
+       first to switch it. -->
+  <div class="corner"><Appearance /></div>
+
   <form onsubmit={submit}>
     <div class="mark">
       <svg viewBox="0 0 100 100" width="34" height="34" aria-hidden="true">
@@ -56,14 +63,10 @@
       </svg>
     </div>
 
-    <h1>{needsSetup ? 'Set up publix' : 'Sign in to publix'}</h1>
-    <p class="muted">
-      {needsSetup
-        ? 'Choose a password for this server. It is the only credential that protects your deployments, so make it a real one.'
-        : 'Enter the admin password for this server.'}
-    </p>
+    <h1>{needsSetup ? t('login.setupTitle') : t('login.signInTitle')}</h1>
+    <p class="muted">{needsSetup ? t('login.setupBlurb') : t('login.signInBlurb')}</p>
 
-    <label for="pw">Password</label>
+    <label for="pw">{t('login.password')}</label>
     <input
       id="pw"
       type="password"
@@ -73,14 +76,14 @@
     />
 
     {#if needsSetup}
-      <label for="pw2">Confirm password</label>
+      <label for="pw2">{t('login.confirmPassword')}</label>
       <input id="pw2" type="password" bind:value={confirm} autocomplete="new-password" required />
     {/if}
 
     {#if error}<p class="error">{error}</p>{/if}
 
     <Button type="submit" variant="primary" size="lg" {pending}>
-      {needsSetup ? 'Create password' : 'Sign in'}
+      {needsSetup ? t('login.create') : t('login.signIn')}
     </Button>
   </form>
 </div>
@@ -105,6 +108,12 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
+  }
+
+  .corner {
+    position: fixed;
+    top: 12px;
+    right: 12px;
   }
 
   .mark { color: var(--accent); margin-bottom: 6px; }

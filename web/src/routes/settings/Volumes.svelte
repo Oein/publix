@@ -8,6 +8,7 @@
   import Empty from '../../lib/Empty.svelte';
   import Modal from '../../lib/Modal.svelte';
   import Confirm from '../../lib/Confirm.svelte';
+  import { t, tparts } from '../../lib/i18n.svelte.js';
 
   /**
    * Shared volumes.
@@ -68,7 +69,7 @@
         readOnly,
         create,
       });
-      notify.success(`Registered ${name.trim()}`);
+      notify.success(t('vol.registered', { name: name.trim() }));
       adding = false;
     } catch (err) {
       notify.error(err);
@@ -80,7 +81,7 @@
   async function remove() {
     try {
       settings = await api.settings.removeVolume(removing.name);
-      notify.success(`Unregistered ${removing.name} — its data was left on disk.`);
+      notify.success(t('vol.unregistered', { name: removing.name }));
       removing = null;
     } catch (err) {
       notify.error(err);
@@ -93,11 +94,11 @@
     <div class="grow">
       <div class="row wrap">
         <code class="vname">{vol.name}</code>
-        {#if vol.readOnly}<Badge tone="muted">Read-only</Badge>{/if}
+        {#if vol.readOnly}<Badge tone="muted">{t('vol.readOnly')}</Badge>{/if}
         {#if vol.error}<Badge tone="bad">{vol.error}</Badge>{/if}
       </div>
       <div class="paths small">
-        <span class="faint">host</span>
+        <span class="faint">{t('vol.host')}</span>
         <code>{vol.example}</code>
         <span class="faint">→</span>
         <code>{vol.mount}</code>
@@ -105,46 +106,48 @@
       {#if vol.description}<p class="muted small desc">{vol.description}</p>{/if}
       <div class="small faint used">
         {#if vol.usedBy.length}
-          Used by {vol.usedBy.join(', ')}
+          {t('vol.usedBy', { list: vol.usedBy.join(', ') })}
         {:else}
-          Not used by any project
+          {t('vol.notUsed')}
         {/if}
       </div>
     </div>
-    <Button size="sm" variant="danger" onclick={() => (removing = vol)}>Unregister</Button>
+    <Button size="sm" variant="danger" onclick={() => (removing = vol)}>
+      {t('vol.unregister')}
+    </Button>
   </li>
 {/snippet}
 
-<Card
-  title="Project volumes"
-  description="Storage a project keeps to itself."
->
+<Card title={t('vol.projectTitle')} description={t('vol.projectDesc')}>
   {#snippet actions()}
-    <Button size="sm" variant="primary" onclick={() => openAdd('project')}>Register volume</Button>
+    <Button size="sm" variant="primary" onclick={() => openAdd('project')}>
+      {t('vol.register')}
+    </Button>
   {/snippet}
 
   <div class="explain">
     <p class="small">
-      A project asks for a volume <em>by name</em> in its <code>deployment.yaml</code> — it never
-      names a host path. publix mounts
-      <code class="path">&lt;host path&gt;/&lt;project id&gt;</code>
-      into the container at <code>/shared/&lt;name&gt;</code>.
+      {#each tparts('vol.projectExplain') as part}{#if part.slot === 'byName'}<em
+          >{t('vol.byName')}</em
+        >{:else if part.slot === 'file'}<code>deployment.yaml</code
+        >{:else if part.slot === 'hostPath'}<code class="path"
+          >{t('vol.tokenHostPath')}/{t('vol.tokenProjectId')}</code
+        >{:else if part.slot === 'mount'}<code>/shared/{t('vol.tokenName')}</code
+        >{:else}{part.text}{/if}{/each}
     </p>
     <p class="small muted">
-      The per-project subdirectory is the isolation boundary: two projects can both mount
-      <code>disk0</code> and neither can reach the other's files. The project ID never changes,
-      so renaming a project cannot orphan or expose its data.
+      {#each tparts('vol.projectExplainNote') as part}{#if part.slot}<code>disk0</code
+        >{:else}{part.text}{/if}{/each}
     </p>
   </div>
 
   {#if settings === null}
-    <p class="muted small">Loading…</p>
+    <p class="muted small">{t('common.loading')}</p>
   {:else if projectVolumes.length === 0}
-    <Empty
-      title="No project volumes"
-      description="Register a directory and projects can persist data across deployments — uploads, caches, databases — each in its own place."
-    >
-      <Button variant="primary" onclick={() => openAdd('project')}>Register a volume</Button>
+    <Empty title={t('vol.noProjectTitle')} description={t('vol.noProjectDesc')}>
+      <Button variant="primary" onclick={() => openAdd('project')}>
+        {t('vol.registerAVolume')}
+      </Button>
     </Empty>
   {:else}
     <ul class="vols">
@@ -153,34 +156,26 @@
   {/if}
 </Card>
 
-<Card
-  title="Shared volumes"
-  description="One directory that every project mounting it reads and writes."
->
+<Card title={t('vol.sharedTitle')} description={t('vol.sharedDesc')}>
   {#snippet actions()}
-    <Button size="sm" onclick={() => openAdd('shared')}>Register volume</Button>
+    <Button size="sm" onclick={() => openAdd('shared')}>{t('vol.register')}</Button>
   {/snippet}
 
   <div class="explain warn">
     <p class="small">
-      Every project that mounts a shared volume gets the <em>same</em> directory —
-      <code class="path">&lt;host path&gt;</code>, with no per-project subdirectory. That is the
-      point: a media library, a dataset, a common cache.
+      {#each tparts('vol.sharedExplain') as part}{#if part.slot === 'same'}<em
+          >{t('vol.same')}</em
+        >{:else if part.slot === 'hostPath'}<code class="path">{t('vol.tokenHostPath')}</code
+        >{:else}{part.text}{/if}{/each}
     </p>
-    <p class="small muted">
-      It also means there is no isolation. Any project mounting it can read, overwrite or delete
-      what another one wrote. Mark it read-only if the projects using it only need to read.
-    </p>
+    <p class="small muted">{t('vol.sharedExplainNote')}</p>
   </div>
 
   {#if settings === null}
-    <p class="muted small">Loading…</p>
+    <p class="muted small">{t('common.loading')}</p>
   {:else if sharedVolumes.length === 0}
-    <Empty
-      title="No shared volumes"
-      description="Register one when several projects genuinely need the same files. If they each need their own storage, use a project volume instead."
-    >
-      <Button onclick={() => openAdd('shared')}>Register a shared volume</Button>
+    <Empty title={t('vol.noSharedTitle')} description={t('vol.noSharedDesc')}>
+      <Button onclick={() => openAdd('shared')}>{t('vol.registerAShared')}</Button>
     </Empty>
   {:else}
     <ul class="vols">
@@ -189,11 +184,8 @@
   {/if}
 </Card>
 
-<Card title="Using a volume in a project">
-  <p class="muted small">
-    A project names a volume the same way whichever kind it is — the scope is the server's
-    decision, not the repository's:
-  </p>
+<Card title={t('vol.usingTitle')}>
+  <p class="muted small">{t('vol.usingBlurb')}</p>
   <pre class="mono">{`volumes:
   - disk0                  # mounts at /shared/disk0
 
@@ -203,29 +195,24 @@
 
   - name: disk0
     subPath: cache         # a subdirectory of what this project gets`}</pre>
-  <p class="muted small">
-    Asking for a volume the server has not registered fails the deploy with a message naming it,
-    rather than starting the app with a missing directory.
-  </p>
+  <p class="muted small">{t('vol.usingNote')}</p>
 </Card>
 
 {#if adding}
   <Modal
-    title={scope === 'shared' ? 'Register a shared volume' : 'Register a project volume'}
+    title={scope === 'shared' ? t('vol.addSharedTitle') : t('vol.addProjectTitle')}
     onclose={() => (adding = false)}
   >
     <div class="form">
-      <Field label="Name" hint="What projects write in deployment.yaml." required>
+      <Field label={t('vol.name')} hint={t('vol.nameHint')} required>
         {#snippet children(id)}
           <input {id} bind:value={name} placeholder="disk0" autocomplete="off" spellcheck="false" />
         {/snippet}
       </Field>
 
       <Field
-        label="Host path"
-        hint={scope === 'shared'
-          ? 'Every project that mounts this volume gets this directory itself. Never point it at a system directory.'
-          : 'publix creates one subdirectory per project inside it. Never point this at a system directory.'}
+        label={t('vol.path')}
+        hint={scope === 'shared' ? t('vol.pathHintShared') : t('vol.pathHintProject')}
         required
       >
         {#snippet children(id)}
@@ -233,44 +220,53 @@
         {/snippet}
       </Field>
 
-      <Field label="Description" hint="Shown here, to remind you what this is for.">
+      <Field label={t('vol.description')} hint={t('vol.descriptionHint')}>
         {#snippet children(id)}
-          <input {id} bind:value={description} placeholder="Bulk storage on the data disk" autocomplete="off" />
+          <input
+            {id}
+            bind:value={description}
+            placeholder={t('vol.descriptionPlaceholder')}
+            autocomplete="off"
+          />
         {/snippet}
       </Field>
 
       <label class="check">
         <input type="checkbox" bind:checked={create} />
-        <span>Create the directory if it does not exist</span>
+        <span>{t('vol.create')}</span>
       </label>
 
       <label class="check">
         <input type="checkbox" bind:checked={readOnly} />
         <span>
-          Mount read-only for every project
-          <span class="small muted">Overrides whatever a project's deployment.yaml asks for.</span>
+          {t('vol.mountReadOnly')}
+          <span class="small muted">{t('vol.mountReadOnlyHint')}</span>
         </span>
       </label>
 
       {#if name.trim() && path.trim()}
         <div class="preview small" class:sharedPreview={scope === 'shared'}>
           {#if scope === 'shared'}
-            <strong>Every</strong> project that mounts this sees
-            <code>{path.trim()}</code> at <code>/shared/{name.trim()}</code> — the same files,
-            with no isolation between them.
+            {#each tparts('vol.previewShared') as part}{#if part.slot === 'every'}<strong
+                >{t('vol.every')}</strong
+              >{:else if part.slot === 'path'}<code>{path.trim()}</code
+              >{:else if part.slot === 'mount'}<code>/shared/{name.trim()}</code
+              >{:else}{part.text}{/if}{/each}
           {:else}
-            A project with ID <code>abcd1234</code> would see
-            <code>{path.trim()}/abcd1234</code> at <code>/shared/{name.trim()}</code>. Another
-            project mounting the same volume gets its own directory.
+            {#each tparts('vol.previewProject') as part}{#if part.slot === 'id'}<code
+                >abcd1234</code
+              >{:else if part.slot === 'path'}<code>{path.trim()}/abcd1234</code
+              >{:else if part.slot === 'mount'}<code>/shared/{name.trim()}</code
+              >{:else}{part.text}{/if}{/each}
           {/if}
         </div>
       {/if}
     </div>
 
     {#snippet footer()}
-      <Button variant="ghost" onclick={() => (adding = false)}>Cancel</Button>
+      <Button variant="ghost" onclick={() => (adding = false)}>{t('common.cancel')}</Button>
       <Button variant="primary" pending={saving} disabled={!name.trim() || !path.trim()} onclick={add}>
-        Register
+        {t('vol.registerButton')}
       </Button>
     {/snippet}
   </Modal>
@@ -278,9 +274,9 @@
 
 {#if removing}
   <Confirm
-    title="Unregister {removing.name}?"
-    message="Projects will no longer be able to mount it. Nothing on disk is deleted — {removing.path} and everything under it stays exactly as it is."
-    confirmLabel="Unregister"
+    title={t('vol.unregisterTitle', { name: removing.name })}
+    message={t('vol.unregisterMessage', { path: removing.path })}
+    confirmLabel={t('vol.unregister')}
     danger
     onconfirm={remove}
     onclose={() => (removing = null)}

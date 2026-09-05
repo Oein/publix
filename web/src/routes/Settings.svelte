@@ -1,5 +1,6 @@
 <script>
   import { route } from '../lib/router.js';
+  import { t } from '../lib/i18n.svelte.js';
   import ServerSettings from './settings/Server.svelte';
   import Volumes from './settings/Volumes.svelte';
   import GitHubSettings from './settings/GitHub.svelte';
@@ -10,19 +11,14 @@
   let section = $state('server');
   route.subscribe((r) => (section = r.segments[1] ?? 'server'));
 
-  const tabs = [
-    { key: 'server', label: 'Server' },
-    { key: 'volumes', label: 'Volumes' },
-    { key: 'github', label: 'GitHub' },
-    { key: 'account', label: 'Account' },
-  ];
+  const tabs = ['server', 'volumes', 'github', 'account'];
 </script>
 
-<h1>Settings</h1>
+<h1>{t('settings.title')}</h1>
 
 <nav class="tabs">
-  {#each tabs as t}
-    <a href="#/settings/{t.key}" class:active={section === t.key}>{t.label}</a>
+  {#each tabs as key}
+    <a href="#/settings/{key}" class:active={section === key}>{t(`settings.tab.${key}`)}</a>
   {/each}
 </nav>
 

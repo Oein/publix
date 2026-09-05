@@ -418,6 +418,26 @@ make dev         # run the server with a live-reloading dashboard
 The dashboard is a Svelte 5 app compiled into the Go binary, so a build
 produces one self-contained file with no assets to deploy alongside it.
 
+### Appearance and language
+
+The button beside **Sign out** sets the theme (system, light or dark) and
+the language (English or Korean). Both are per-browser preferences kept in
+`localStorage`, not server settings, so two people using the same publix
+see it their own way. The defaults follow the machine: the OS colour scheme,
+and `navigator.languages` for the language.
+
+To add a language, copy `web/src/lib/locales/en.js`, translate the values,
+and add it to `CATALOGS` and `LANGUAGES` in `web/src/lib/i18n.svelte.js`.
+A key missing from a translation falls back to English rather than rendering
+blank, and `TestLocaleCatalogsHaveTheSameKeys` fails on a catalogue that has
+drifted. Dates, relative times and numbers come from `Intl`, so they follow
+the chosen language without a catalogue entry.
+
+Messages the server produces — API errors, deploy failures, build output —
+stay in English. Translating them would mean an error-code protocol running
+through the whole Go codebase, and the build output is the toolchain's, not
+publix's.
+
 ## Requirements
 
 Installed with the script above, nothing is needed but a fresh Ubuntu or

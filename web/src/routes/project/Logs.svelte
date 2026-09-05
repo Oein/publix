@@ -5,6 +5,7 @@
   import Badge from '../../lib/Badge.svelte';
   import Button from '../../lib/Button.svelte';
   import LogView from '../../lib/LogView.svelte';
+  import { t } from '../../lib/i18n.svelte.js';
 
   let { project } = $props();
 
@@ -74,8 +75,12 @@
 
 <div class="bar">
   <div class="switch">
-    <button class:active={mode === 'build'} onclick={() => (mode = 'build')}>Build</button>
-    <button class:active={mode === 'runtime'} onclick={() => (mode = 'runtime')}>Runtime</button>
+    <button class:active={mode === 'build'} onclick={() => (mode = 'build')}>
+      {t('logs.build')}
+    </button>
+    <button class:active={mode === 'runtime'} onclick={() => (mode = 'runtime')}>
+      {t('logs.runtime')}
+    </button>
   </div>
 
   {#if mode === 'build'}
@@ -93,30 +98,30 @@
       <span class="small faint nowrap">{age(deployment.finishedAt ?? deployment.queuedAt)}</span>
     {/if}
   {:else}
-    <span class="small muted">Live output from this project's running containers.</span>
+    <span class="small muted">{t('logs.runtimeBlurb')}</span>
   {/if}
 
   <span class="grow"></span>
 
   {#if streaming}
-    <span class="small muted row"><span class="pulse"></span> streaming</span>
+    <span class="small muted row"><span class="pulse"></span> {t('logs.streaming')}</span>
   {/if}
 </div>
 
 {#if mode === 'build' && deployments.length === 0}
-  <div class="panel empty">This project has not been deployed yet.</div>
+  <div class="panel empty">{t('logs.notDeployed')}</div>
 {:else}
   <LogView
     {lines}
     {streaming}
     height="min(62vh, 620px)"
-    empty={mode === 'build' ? 'No build output for this deployment.' : 'Waiting for container output…'}
+    empty={mode === 'build' ? t('logs.noBuildOutput') : t('logs.waiting')}
   />
 {/if}
 
 {#if mode === 'build' && deployment?.error}
   <div class="failure">
-    <strong>This deployment failed</strong>
+    <strong>{t('logs.failed')}</strong>
     <pre>{deployment.error}</pre>
   </div>
 {/if}

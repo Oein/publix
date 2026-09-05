@@ -1,48 +1,69 @@
 // Small formatting helpers shared across the dashboard. Kept together so
 // that dates and sizes read the same way on every screen.
 
-/** Renders a timestamp the way a person reads it: relative and coarse. */
-export function age(value) {
-  if (!value) return '—';
-  const then = new Date(value).getTime();
-  if (Number.isNaN(then)) return '—';
+import { locale, t } from './i18n.svelte.js';
 
+// Intl formatters are expensive to construct and are asked for on every
+// row of every list, so keep one per locale.
+const relative = new Map();
+
+function rtf(tag) {
+  let f = relative.get(tag);
+  if (!f) {
+    f = new Intl.RelativeTimeFormat(tag, { style: 'narrow' });
+    relative.set(tag, f);
+  }
+  return f;
+}
+
+/**
+ * Renders a timestamp the way a person reads it: relative and coarse.
+ *
+ * Intl does the wording, so "3m ago" becomes "3분 전" without this file
+ * knowing anything about Korean.
+ */
+export function age(value) {
+  if (!value) return t('fmt.none');
+  const then = new Date(value).getTime();
+  if (Number.isNaN(then)) return t('fmt.none');
+
+  const tag = locale();
   const seconds = Math.round((Date.now() - then) / 1000);
-  if (seconds < 0) return 'just now';
-  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 0) return t('fmt.justNow');
+  if (seconds < 60) return rtf(tag).format(-seconds, 'second');
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) return rtf(tag).format(-minutes, 'minute');
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return rtf(tag).format(-hours, 'hour');
   const days = Math.round(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(value).toLocaleDateString();
+  if (days < 30) return rtf(tag).format(-days, 'day');
+  return new Date(value).toLocaleDateString(tag);
 }
 
 /** Full timestamp, for tooltips where precision matters. */
 export function exact(value) {
   if (!value) return '';
   const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString();
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(locale());
 }
 
 /** Duration between two timestamps, or from one to now. */
 export function duration(from, to) {
-  if (!from) return '—';
+  if (!from) return t('fmt.none');
   const start = new Date(from).getTime();
   const end = to ? new Date(to).getTime() : Date.now();
   const ms = end - start;
-  if (ms < 0) return '—';
-  if (ms < 1000) return `${ms}ms`;
+  if (ms < 0) return t('fmt.none');
+  if (ms < 1000) return t('fmt.durationMs', { ms });
   const s = Math.round(ms / 1000);
-  if (s < 60) return `${s}s`;
+  if (s < 60) return t('fmt.durationSeconds', { s });
   const m = Math.floor(s / 60);
-  return `${m}m ${s % 60}s`;
+  return t('fmt.durationMinutes', { m, s: s % 60 });
 }
 
 /** Byte count in the largest unit that stays readable. */
 export function bytes(n) {
-  if (!n) return '—';
+  if (!n) return t('fmt.none');
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let i = 0;
   let v = n;
@@ -79,25 +100,18 @@ export function statusTone(status) {
   }
 }
 
+const STATUSES = ['live', 'failed', 'building', 'deploying', 'queued', 'superseded', 'cancelled'];
+
+/**
+ * A status name in the reader's language.
+ *
+ * A status the server introduces that this dashboard has not been taught
+ * shows through untranslated rather than as "Unknown", which is at least
+ * the truth about what the server said.
+ */
 export function statusLabel(status) {
-  switch (status) {
-    case 'live':
-      return 'Live';
-    case 'failed':
-      return 'Failed';
-    case 'building':
-      return 'Building';
-    case 'deploying':
-      return 'Deploying';
-    case 'queued':
-      return 'Queued';
-    case 'superseded':
-      return 'Superseded';
-    case 'cancelled':
-      return 'Cancelled';
-    default:
-      return status ?? 'Unknown';
-  }
+  if (STATUSES.includes(status)) return t(`status.${status}`);
+  return status || t('status.unknown');
 }
 
 /** True while a deployment is still doing something. */

@@ -1,6 +1,7 @@
 <script>
   import Modal from './Modal.svelte';
   import Button from './Button.svelte';
+  import { t, tparts } from './i18n.svelte.js';
 
   /**
    * A confirmation dialog.
@@ -13,7 +14,7 @@
   let {
     title,
     message,
-    confirmLabel = 'Confirm',
+    confirmLabel = undefined,
     confirmText = '',
     danger = false,
     onconfirm,
@@ -40,7 +41,10 @@
   <p>{message}</p>
   {#if children}{@render children()}{/if}
   {#if confirmText}
-    <p class="small muted">Type <code>{confirmText}</code> to confirm.</p>
+    <p class="small muted">
+      {#each tparts('confirm.typeToConfirm') as part}{#if part.slot}<code>{confirmText}</code
+        >{:else}{part.text}{/if}{/each}
+    </p>
     <input
       bind:value={typed}
       placeholder={confirmText}
@@ -51,14 +55,14 @@
   {/if}
 
   {#snippet footer()}
-    <Button variant="ghost" onclick={onclose}>Cancel</Button>
+    <Button variant="ghost" onclick={onclose}>{t('common.cancel')}</Button>
     <Button
       variant={danger ? 'danger' : 'primary'}
       disabled={!unlocked}
       {pending}
       onclick={run}
     >
-      {confirmLabel}
+      {confirmLabel ?? t('common.confirm')}
     </Button>
   {/snippet}
 </Modal>

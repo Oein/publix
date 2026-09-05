@@ -4,6 +4,7 @@
   import Button from '../../lib/Button.svelte';
   import Card from '../../lib/Card.svelte';
   import Field from '../../lib/Field.svelte';
+  import { t } from '../../lib/i18n.svelte.js';
 
   let { project, onchange, ondelete } = $props();
 
@@ -54,7 +55,7 @@
         autoDeploy,
         paused,
       });
-      notify.success('Project updated');
+      notify.success(t('ps.updated'));
       onchange();
     } catch (err) {
       notify.error(err);
@@ -64,22 +65,22 @@
   }
 </script>
 
-<Card title="Project">
+<Card title={t('ps.project')}>
   <div class="form">
-    <Field label="Name" hint="Also sets the project's generated hostname.">
+    <Field label={t('ps.name')} hint={t('ps.nameHint')}>
       {#snippet children(id)}<input {id} bind:value={name} autocomplete="off" />{/snippet}
     </Field>
 
-    <Field label="Description">
+    <Field label={t('ps.description')}>
       {#snippet children(id)}<input {id} bind:value={description} autocomplete="off" />{/snippet}
     </Field>
 
     {#if project.repo}
       <div class="two">
-        <Field label="Branch" hint="Pushes here deploy to production.">
+        <Field label={t('ps.branch')} hint={t('ps.branchHint')}>
           {#snippet children(id)}<input {id} bind:value={branch} autocomplete="off" />{/snippet}
         </Field>
-        <Field label="Root directory" hint="For a monorepo. Empty means the repository root.">
+        <Field label={t('ps.rootDir')} hint={t('ps.rootDirHint')}>
           {#snippet children(id)}
             <input {id} bind:value={rootDir} placeholder="apps/web" autocomplete="off" />
           {/snippet}
@@ -87,10 +88,7 @@
       </div>
     {/if}
 
-    <Field
-      label="deployment.yaml path"
-      hint="Only needed if the file is somewhere other than the root of the build directory."
-    >
+    <Field label={t('ps.specPath')} hint={t('ps.specPathHint')}>
       {#snippet children(id)}
         <input {id} bind:value={specPath} placeholder="deployment.yaml" autocomplete="off" />
       {/snippet}
@@ -99,54 +97,43 @@
     <label class="check">
       <input type="checkbox" bind:checked={autoDeploy} />
       <span>
-        <strong>Deploy on push</strong>
-        <span class="small muted">
-          Requires a webhook on the repository, which is created when a project is imported.
-        </span>
+        <strong>{t('ps.deployOnPush')}</strong>
+        <span class="small muted">{t('ps.deployOnPushHint')}</span>
       </span>
     </label>
 
     <label class="check">
       <input type="checkbox" bind:checked={paused} />
       <span>
-        <strong>Pause</strong>
-        <span class="small muted">
-          Stops webhooks and scheduled jobs. Running containers keep serving; only new deployments
-          are held back.
-        </span>
+        <strong>{t('ps.pause')}</strong>
+        <span class="small muted">{t('ps.pauseHint')}</span>
       </span>
     </label>
   </div>
 
   {#if changed}
     <div class="save">
-      <Button variant="primary" pending={saving} onclick={save}>Save</Button>
-      <Button variant="ghost" onclick={reset}>Discard</Button>
+      <Button variant="primary" pending={saving} onclick={save}>{t('common.save')}</Button>
+      <Button variant="ghost" onclick={reset}>{t('common.discard')}</Button>
     </div>
   {/if}
 </Card>
 
-<Card title="Identifiers">
+<Card title={t('ps.identifiers')}>
   <dl>
-    <div><dt>Project ID</dt><dd><code>{project.id}</code></dd></div>
-    <div><dt>Slug</dt><dd><code>{project.slug}</code></dd></div>
+    <div><dt>{t('ps.projectId')}</dt><dd><code>{project.id}</code></dd></div>
+    <div><dt>{t('ps.slug')}</dt><dd><code>{project.slug}</code></dd></div>
   </dl>
-  <p class="muted small note">
-    The project ID never changes, even if you rename the project. It is what names this project's
-    directory on every shared volume, so renaming can never orphan or expose its data.
-  </p>
+  <p class="muted small note">{t('ps.idNote')}</p>
 </Card>
 
-<Card title="Danger zone">
+<Card title={t('ps.danger')}>
   <div class="spread">
     <div>
-      <strong class="small">Delete this project</strong>
-      <p class="muted small">
-        Removes its containers, images and GitHub webhook. Files it wrote to shared volumes are
-        kept.
-      </p>
+      <strong class="small">{t('ps.deleteHeading')}</strong>
+      <p class="muted small">{t('ps.deleteBlurb')}</p>
     </div>
-    <Button variant="danger" onclick={ondelete}>Delete</Button>
+    <Button variant="danger" onclick={ondelete}>{t('common.delete')}</Button>
   </div>
 </Card>
 

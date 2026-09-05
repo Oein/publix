@@ -1,4 +1,6 @@
 <script>
+  import { t } from './i18n.svelte.js';
+
   /**
    * A log viewer.
    *
@@ -7,7 +9,7 @@
    * than a log that yanks you back to the bottom while you are reading the
    * error you scrolled up to find.
    */
-  let { lines = [], streaming = false, empty = 'No output yet.', height = '460px' } = $props();
+  let { lines = [], streaming = false, empty = undefined, height = '460px' } = $props();
 
   let container = $state(null);
   let following = $state(true);
@@ -43,10 +45,10 @@
     {onscroll}
     tabindex="0"
     role="region"
-    aria-label="Log output"
+    aria-label={t('logview.label')}
   >
     {#if lines.length === 0}
-      <div class="placeholder">{empty}</div>
+      <div class="placeholder">{empty ?? t('logview.empty')}</div>
     {:else}
       <!-- Unkeyed: a log is append-only, so index identity is correct, and
            it stays robust if a stream ever re-delivers a sequence number. -->
@@ -64,7 +66,7 @@
   </div>
 
   {#if !following}
-    <button class="jump" onclick={toBottom}>Jump to latest ↓</button>
+    <button class="jump" onclick={toBottom}>{t('logview.jump')}</button>
   {/if}
 </div>
 

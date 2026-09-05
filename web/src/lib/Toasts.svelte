@@ -1,5 +1,6 @@
 <script>
   import { toasts, dismiss } from './toast.js';
+  import { t } from './i18n.svelte.js';
 
   let list = $state([]);
   toasts.subscribe((v) => (list = v));
@@ -16,7 +17,7 @@
           </ul>
         {/if}
       </div>
-      <button onclick={() => dismiss(toast.id)} aria-label="Dismiss">×</button>
+      <button onclick={() => dismiss(toast.id)} aria-label={t('common.dismiss')}>×</button>
     </div>
   {/each}
 </div>

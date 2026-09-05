@@ -3,6 +3,7 @@
   import { notify } from '../../lib/toast.js';
   import Button from '../../lib/Button.svelte';
   import Card from '../../lib/Card.svelte';
+  import { t, tparts } from '../../lib/i18n.svelte.js';
 
   /**
    * Environment variables.
@@ -69,7 +70,7 @@
       parsed.push({ key: line.slice(0, eq).trim(), value, secret: true, stored: false, dirty: true });
     }
     if (parsed.length === 0) {
-      notify.error('Nothing that looked like KEY=value was found.');
+      notify.error(t('env.nothingParsed'));
       return;
     }
     const byKey = new Map(rows.map((r) => [r.key, r]));
@@ -77,7 +78,7 @@
     rows = [...byKey.values()];
     bulk = '';
     showBulk = false;
-    notify.info(`${parsed.length} variable${parsed.length === 1 ? '' : 's'} staged — press Save to apply.`);
+    notify.info(t('env.staged', { count: parsed.length }));
   }
 
   async function save() {
@@ -95,7 +96,7 @@
             secret: r.secret,
           }))
       );
-      notify.success('Environment saved. Redeploy for it to take effect.');
+      notify.success(t('env.saved'));
       onchange();
     } catch (err) {
       notify.error(err);
@@ -105,13 +106,12 @@
   }
 </script>
 
-<Card
-  title="Environment variables"
-  description="Injected into every container. These override anything set in deployment.yaml."
->
+<Card title={t('env.title')} description={t('env.desc')}>
   {#snippet actions()}
-    <Button size="sm" variant="ghost" onclick={() => (showBulk = !showBulk)}>Paste .env</Button>
-    <Button size="sm" onclick={add}>Add variable</Button>
+    <Button size="sm" variant="ghost" onclick={() => (showBulk = !showBulk)}>
+      {t('env.paste')}
+    </Button>
+    <Button size="sm" onclick={add}>{t('env.addVariable')}</Button>
   {/snippet}
 
   {#if showBulk}
@@ -123,17 +123,20 @@
         placeholder={'DATABASE_URL=postgres://…\nAPI_KEY=…'}
       ></textarea>
       <div class="row">
-        <Button size="sm" variant="primary" onclick={applyBulk}>Add these</Button>
-        <Button size="sm" variant="ghost" onclick={() => (showBulk = false)}>Cancel</Button>
-        <span class="small faint">Pasted values are marked secret.</span>
+        <Button size="sm" variant="primary" onclick={applyBulk}>{t('env.addThese')}</Button>
+        <Button size="sm" variant="ghost" onclick={() => (showBulk = false)}>
+          {t('common.cancel')}
+        </Button>
+        <span class="small faint">{t('env.pastedSecret')}</span>
       </div>
     </div>
   {/if}
 
   {#if rows.length === 0}
     <p class="muted small">
-      No variables yet. publix always provides <code>PORT</code>, <code>PUBLIX_COMMIT</code> and a
-      few others; anything your app needs beyond that goes here.
+      {#each tparts('env.emptyNote') as part}{#if part.slot === 'port'}<code>PORT</code
+        >{:else if part.slot === 'commit'}<code>PUBLIX_COMMIT</code
+        >{:else}{part.text}{/if}{/each}
     </p>
   {:else}
     <div class="rows">
@@ -150,21 +153,25 @@
           <input
             class="value mono"
             type={row.secret && !row.dirty && row.stored ? 'password' : 'text'}
-            placeholder={row.stored && !row.dirty ? '•••••••• (unchanged)' : 'value'}
+            placeholder={row.stored && !row.dirty ? t('env.unchanged') : t('env.value')}
             value={row.stored && !row.dirty ? '' : row.value}
             oninput={(e) => touch(i, { value: e.currentTarget.value, stored: false })}
             autocomplete="off"
             spellcheck="false"
           />
-          <label class="secret" title="Hide this value from the dashboard after saving">
+          <label class="secret" title={t('env.secretHint')}>
             <input
               type="checkbox"
               checked={row.secret}
               onchange={(e) => touch(i, { secret: e.currentTarget.checked })}
             />
-            secret
+            {t('env.secret')}
           </label>
-          <button class="del" onclick={() => remove(i)} aria-label="Remove {row.key}">×</button>
+          <button
+            class="del"
+            onclick={() => remove(i)}
+            aria-label={t('common.remove', { name: row.key })}>×</button
+          >
         </div>
       {/each}
     </div>
@@ -172,24 +179,22 @@
 
   {#if changed}
     <div class="save">
-      <Button variant="primary" pending={saving} onclick={save}>Save changes</Button>
-      <Button variant="ghost" onclick={reset}>Discard</Button>
-      <span class="small muted">Changes apply on the next deployment.</span>
+      <Button variant="primary" pending={saving} onclick={save}>{t('common.saveChanges')}</Button>
+      <Button variant="ghost" onclick={reset}>{t('common.discard')}</Button>
+      <span class="small muted">{t('env.applyNext')}</span>
     </div>
   {/if}
 </Card>
 
-<Card title="Referencing these in deployment.yaml">
-  <p class="muted small">
-    A repository can read these without hard-coding values, which keeps credentials out of git:
-  </p>
+<Card title={t('env.refTitle')}>
+  <p class="muted small">{t('env.refBlurb')}</p>
   <pre class="mono">{`env:
   DATABASE_URL: \${secret.DATABASE_URL}
   PUBLIC_URL: https://\${publix.PROJECT}.example.com
   LOG_LEVEL: \${secret.LOG_LEVEL:-info}`}</pre>
   <p class="muted small">
-    A reference with no value and no <code>:-default</code> fails the deploy rather than starting
-    your app with an empty setting.
+    {#each tparts('env.refNote') as part}{#if part.slot}<code>:-default</code
+      >{:else}{part.text}{/if}{/each}
   </p>
 </Card>
 

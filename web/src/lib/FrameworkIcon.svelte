@@ -170,9 +170,10 @@
     border-radius: var(--radius-sm);
   }
 
-  /* A near-black accent vanishes on a dark background. */
+  /* A near-black accent vanishes on a dark background. The :not() guard
+     lets an explicit light choice win over an OS that prefers dark. */
   @media (prefers-color-scheme: dark) {
-    .dim { color: var(--text); }
+    :global(:root:not([data-theme='light'])) .dim { color: var(--text); }
   }
-  :global([data-theme='dark']) .dim { color: var(--text); }
+  :global(:root[data-theme='dark']) .dim { color: var(--text); }
 </style>

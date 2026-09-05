@@ -6,6 +6,7 @@
   import Field from '../../lib/Field.svelte';
   import Badge from '../../lib/Badge.svelte';
   import Confirm from '../../lib/Confirm.svelte';
+  import { t, tparts } from '../../lib/i18n.svelte.js';
 
   let { revision } = $props();
 
@@ -53,7 +54,7 @@
       if (status.error) {
         notify.error(status.error);
       } else {
-        notify.success(`Connected to GitHub as ${status.login}`);
+        notify.success(t('gh.connectedToast', { login: status.login }));
       }
     } catch (err) {
       notify.error(err);
@@ -65,7 +66,7 @@
   async function disconnect() {
     try {
       await api.github.disconnect();
-      notify.success('Disconnected from GitHub');
+      notify.success(t('gh.disconnected'));
       disconnecting = false;
       load();
     } catch (err) {
@@ -75,37 +76,36 @@
 
   function copy(value, what) {
     navigator.clipboard?.writeText(value);
-    notify.info(`${what} copied`);
+    notify.info(t('gh.copied', { what }));
   }
 </script>
 
-<Card title="GitHub connection">
+<Card title={t('gh.connection')}>
   {#snippet actions()}
     {#if status?.configured}
-      <Button size="sm" variant="danger" onclick={() => (disconnecting = true)}>Disconnect</Button>
+      <Button size="sm" variant="danger" onclick={() => (disconnecting = true)}>
+        {t('gh.disconnect')}
+      </Button>
     {/if}
   {/snippet}
 
   {#if status === null}
-    <p class="muted small">Loading…</p>
+    <p class="muted small">{t('common.loading')}</p>
   {:else if status.configured && !status.error}
     <div class="connected">
       {#if status.avatar}<img src={status.avatar} alt="" width="34" height="34" />{/if}
       <div class="grow">
         <div class="row">
           <strong>{status.login}</strong>
-          <Badge tone="good" dot>Connected</Badge>
-          <Badge tone="muted">{status.mode === 'app' ? 'GitHub App' : 'Access token'}</Badge>
+          <Badge tone="good" dot>{t('gh.connected')}</Badge>
+          <Badge tone="muted">{status.mode === 'app' ? t('gh.app') : t('gh.token')}</Badge>
         </div>
-        <p class="small muted">
-          Repositories are listed on the Import screen. Pushes deploy automatically for projects
-          with a webhook.
-        </p>
+        <p class="small muted">{t('gh.connectedBlurb')}</p>
       </div>
     </div>
   {:else if status.error}
     <div class="problem">
-      <strong class="small">GitHub rejected the stored credentials</strong>
+      <strong class="small">{t('gh.rejected')}</strong>
       <p class="small muted">{status.error}</p>
     </div>
   {/if}
@@ -113,51 +113,46 @@
   {#if !status?.configured || status?.error}
     <div class="modes">
       <button class:active={mode === 'token'} onclick={() => (mode = 'token')}>
-        <strong>Personal access token</strong>
-        <span class="small muted">Fastest to set up. Sees whatever your account can see.</span>
+        <strong>{t('gh.tokenMode')}</strong>
+        <span class="small muted">{t('gh.tokenModeHint')}</span>
       </button>
       <button class:active={mode === 'app'} onclick={() => (mode = 'app')}>
-        <strong>GitHub App</strong>
-        <span class="small muted">
-          Right for an organisation: scoped per repository, tokens rotate on their own.
-        </span>
+        <strong>{t('gh.appMode')}</strong>
+        <span class="small muted">{t('gh.appModeHint')}</span>
       </button>
     </div>
   {/if}
 
   <div class="form">
     {#if mode === 'token'}
-      <Field
-        label="Access token"
-        hint="A classic token needs the `repo` scope. A fine-grained token needs Contents (read), Metadata (read), Webhooks (read and write) and Commit statuses (write)."
-        required={!status?.configured}
-      >
+      <Field label={t('gh.tokenLabel')} hint={t('gh.tokenHint')} required={!status?.configured}>
         {#snippet children(id)}
           <input
             {id}
             type="password"
             bind:value={token}
-            placeholder={status?.configured ? 'Leave empty to keep the current token' : 'ghp_…'}
+            placeholder={status?.configured ? t('gh.keepToken') : 'ghp_…'}
             autocomplete="off"
             spellcheck="false"
           />
         {/snippet}
       </Field>
     {:else}
-      <Field label="App ID" required>
+      <Field label={t('gh.appId')} required>
         {#snippet children(id)}
           <input {id} bind:value={appId} placeholder="123456" autocomplete="off" />
         {/snippet}
       </Field>
-      <Field
-        label="Installation ID"
-        hint="Optional. If the App has exactly one installation, publix finds it."
-      >
+      <Field label={t('gh.installationId')} hint={t('gh.installationIdHint')}>
         {#snippet children(id)}
           <input {id} bind:value={installationId} placeholder="12345678" autocomplete="off" />
         {/snippet}
       </Field>
-      <Field label="Private key" hint="The PEM file GitHub gave you when you created the App." required={!status?.configured}>
+      <Field
+        label={t('gh.privateKey')}
+        hint={t('gh.privateKeyHint')}
+        required={!status?.configured}
+      >
         {#snippet children(id)}
           <textarea
             {id}
@@ -165,14 +160,14 @@
             rows="5"
             spellcheck="false"
             placeholder={status?.configured
-              ? 'Leave empty to keep the current key'
+              ? t('gh.keepKey')
               : '-----BEGIN RSA PRIVATE KEY-----'}
           ></textarea>
         {/snippet}
       </Field>
     {/if}
 
-    <Field label="API base URL" hint="Only for GitHub Enterprise Server.">
+    <Field label={t('gh.apiBase')} hint={t('gh.apiBaseHint')}>
       {#snippet children(id)}
         <input {id} bind:value={apiBase} placeholder="https://api.github.com" autocomplete="off" />
       {/snippet}
@@ -180,105 +175,127 @@
 
     <div>
       <Button variant="primary" pending={saving} onclick={connect}>
-        {status?.configured ? 'Update connection' : 'Connect'}
+        {status?.configured ? t('gh.update') : t('gh.connect')}
       </Button>
     </div>
   </div>
 </Card>
 
-<Card title="Webhook" description="Where GitHub sends push events.">
+<Card title={t('gh.webhook')} description={t('gh.webhookDesc')}>
   {#if status}
     <div class="field">
-      <label for="hookurl">Payload URL</label>
+      <label for="hookurl">{t('gh.payloadUrl')}</label>
       <div class="hook">
         <code id="hookurl" class="grow truncate">{status.webhookUrl}</code>
-        <Button size="sm" onclick={() => copy(status.webhookUrl, 'URL')}>Copy</Button>
+        <Button size="sm" onclick={() => copy(status.webhookUrl, t('gh.url'))}>
+          {t('common.copy')}
+        </Button>
       </div>
     </div>
 
     <div class="field">
-      <label for="hooksecret">Secret</label>
+      <label for="hooksecret">{t('gh.secret')}</label>
       <div class="hook">
         <code id="hooksecret" class="grow truncate">
           {showSecret ? status.webhookSecret : '•'.repeat(48)}
         </code>
         <Button size="sm" variant="ghost" onclick={() => (showSecret = !showSecret)}>
-          {showSecret ? 'Hide' : 'Reveal'}
+          {showSecret ? t('gh.hide') : t('gh.reveal')}
         </Button>
-        <Button size="sm" onclick={() => copy(status.webhookSecret, 'Secret')}>Copy</Button>
+        <Button size="sm" onclick={() => copy(status.webhookSecret, t('gh.secret'))}>
+          {t('common.copy')}
+        </Button>
       </div>
     </div>
 
     {#if !status.publicUrlSet}
-      <p class="warn small">
-        No public URL is set, so this address was guessed from your browser. Set it under
-        Settings → Server before importing, or webhooks cannot be registered.
-      </p>
+      <p class="warn small">{t('gh.noPublicUrl')}</p>
     {/if}
 
     {#if status.mode === 'app'}
       <div class="note" class:ok={status.appDeliversWebhooks}>
         {#if status.appDeliversWebhooks}
-          <strong class="small">Your GitHub App delivers these webhooks.</strong>
-          <p class="small muted">
-            publix will not add a webhook to each repository, because the App already sends a
-            push event for every repository it is installed on. Adding both would deliver each
-            push twice.
-          </p>
+          <strong class="small">{t('gh.appDelivers')}</strong>
+          <p class="small muted">{t('gh.appDeliversBlurb')}</p>
         {:else}
-          <strong class="small">Set this URL and secret on your GitHub App</strong>
+          <strong class="small">{t('gh.setAppWebhook')}</strong>
           <p class="small muted">
-            Under the App's settings → Webhook. Its <em>Callback URL</em> is not used —
-            publix has no OAuth login, so leave “Request user authorization (OAuth) during
-            installation” unchecked.
+            {#each tparts('gh.setAppWebhookBlurb') as part}{#if part.slot}<em
+                >{t('gh.callbackUrlEm')}</em
+              >{:else}{part.text}{/if}{/each}
           </p>
           {#if status.appWebhookUrl}
             <p class="small muted">
-              The App currently posts to <code>{status.appWebhookUrl}</code>{status.appWebhookActive
-                ? ''
-                : ' (inactive)'}.
+              {#each tparts('gh.appPostsTo', {
+                inactive: status.appWebhookActive ? '' : t('gh.inactive'),
+              }) as part}{#if part.slot}<code>{status.appWebhookUrl}</code
+                >{:else}{part.text}{/if}{/each}
             </p>
           {:else}
             <p class="small muted">
-              The App has no webhook configured. publix will fall back to creating one on each
-              repository as you import it, which also works — it just needs the
-              <em>Webhooks</em> repository permission.
+              {#each tparts('gh.appNoWebhook') as part}{#if part.slot}<em>{t('gh.webhooksPerm')}</em
+                >{:else}{part.text}{/if}{/each}
             </p>
           {/if}
         {/if}
       </div>
     {:else}
-      <p class="muted small">
-        publix registers this on each repository as you import it, with “Deploy on every push”
-        enabled. Its signature is verified on every request, so an unsigned call is refused.
-      </p>
+      <p class="muted small">{t('gh.tokenWebhookBlurb')}</p>
     {/if}
   {/if}
 </Card>
 
-<Card title="Setting up a GitHub App" description="What to put in each field.">
+<Card title={t('gh.setupTitle')} description={t('gh.setupDesc')}>
   <dl>
-    <div><dt>Homepage URL</dt><dd><code>{status?.webhookUrl?.replace('/api/webhooks/github', '') ?? 'https://publix.example.com'}</code> <span class="muted">— required by GitHub, unused by publix</span></dd></div>
-    <div><dt>Callback URL</dt><dd><span class="muted">leave empty; publix has no OAuth login</span></dd></div>
-    <div><dt>Webhook URL</dt><dd><code>{status?.webhookUrl ?? ''}</code></dd></div>
-    <div><dt>Webhook secret</dt><dd><span class="muted">the secret above</span></dd></div>
-    <div><dt>Subscribe to</dt><dd><code>Push</code> <span class="muted">— nothing else is read</span></dd></div>
+    <div>
+      <dt>{t('gh.homepageUrl')}</dt>
+      <dd>
+        <code
+          >{status?.webhookUrl?.replace('/api/webhooks/github', '') ??
+            'https://publix.example.com'}</code
+        >
+        <span class="muted">{t('gh.homepageNote')}</span>
+      </dd>
+    </div>
+    <div>
+      <dt>{t('gh.callbackUrl')}</dt><dd><span class="muted">{t('gh.callbackNote')}</span></dd>
+    </div>
+    <div><dt>{t('gh.webhookUrl')}</dt><dd><code>{status?.webhookUrl ?? ''}</code></dd></div>
+    <div>
+      <dt>{t('gh.webhookSecret')}</dt><dd><span class="muted">{t('gh.webhookSecretNote')}</span></dd>
+    </div>
+    <div>
+      <dt>{t('gh.subscribeTo')}</dt>
+      <dd><code>Push</code> <span class="muted">{t('gh.subscribeNote')}</span></dd>
+    </div>
   </dl>
 
-  <p class="small muted heading">Repository permissions</p>
+  <p class="small muted heading">{t('gh.repoPerms')}</p>
   <dl>
-    <div><dt>Contents</dt><dd>Read-only <span class="muted">— to clone. Read and write only if you want publix to commit a deployment.yaml for you on import.</span></dd></div>
-    <div><dt>Metadata</dt><dd>Read-only <span class="muted">— mandatory; GitHub selects it for you</span></dd></div>
-    <div><dt>Commit statuses</dt><dd>Read and write <span class="muted">— to report deploy results on the commit</span></dd></div>
-    <div><dt>Webhooks</dt><dd>Read and write <span class="muted">— only if the App has no webhook of its own</span></dd></div>
+    <div>
+      <dt>{t('gh.contents')}</dt>
+      <dd>{t('gh.readOnly')} <span class="muted">{t('gh.contentsNote')}</span></dd>
+    </div>
+    <div>
+      <dt>{t('gh.metadata')}</dt>
+      <dd>{t('gh.readOnly')} <span class="muted">{t('gh.metadataNote')}</span></dd>
+    </div>
+    <div>
+      <dt>{t('gh.commitStatuses')}</dt>
+      <dd>{t('gh.readWrite')} <span class="muted">{t('gh.commitStatusesNote')}</span></dd>
+    </div>
+    <div>
+      <dt>{t('gh.webhooks')}</dt>
+      <dd>{t('gh.readWrite')} <span class="muted">{t('gh.webhooksNote')}</span></dd>
+    </div>
   </dl>
 </Card>
 
 {#if disconnecting}
   <Confirm
-    title="Disconnect GitHub?"
-    message="Repository listing and deploy-on-push stop working. Existing projects keep their containers running, and webhooks stay on the repositories until the projects are deleted."
-    confirmLabel="Disconnect"
+    title={t('gh.disconnectTitle')}
+    message={t('gh.disconnectMessage')}
+    confirmLabel={t('gh.disconnect')}
     danger
     onconfirm={disconnect}
     onclose={() => (disconnecting = false)}
