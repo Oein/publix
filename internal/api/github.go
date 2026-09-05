@@ -51,9 +51,21 @@ func (s *Server) handleGitHubStatus(w http.ResponseWriter, r *http.Request) {
 		out["type"] = viewer.Type
 	}
 
-	// In App mode, report where the App itself sends webhooks. If that
-	// already points here, publix must not also create per-repository
-	// hooks, or every push would arrive twice.
+	// In App mode, describe the installation. Which account it is on and
+	// how much of that account it was given are the two things that decide
+	// whether the repository list can have anything in it, so the settings
+	// page reports both rather than leaving "connected, but empty" to be
+	// guessed at.
+	if inst, isApp, err := gh.CurrentInstallation(ctx); isApp && err == nil {
+		out["installationId"] = inst.ID
+		out["installationUrl"] = inst.HTMLURL
+		out["repositorySelection"] = inst.RepositorySelection
+		out["accountType"] = inst.Account.Type
+	}
+
+	// Report where the App itself sends webhooks. If that already points
+	// here, publix must not also create per-repository hooks, or every push
+	// would arrive twice.
 	if app, isApp, err := gh.App(ctx); isApp && err == nil {
 		out["appName"] = app.Name
 		out["appUrl"] = app.HTMLURL

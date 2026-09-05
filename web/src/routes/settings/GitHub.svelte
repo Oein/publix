@@ -95,12 +95,29 @@
     <div class="connected">
       {#if status.avatar}<img src={status.avatar} alt="" width="34" height="34" />{/if}
       <div class="grow">
-        <div class="row">
+        <div class="row wrap">
           <strong>{status.login}</strong>
           <Badge tone="good" dot>{t('gh.connected')}</Badge>
           <Badge tone="muted">{status.mode === 'app' ? t('gh.app') : t('gh.token')}</Badge>
+          {#if status.repositorySelection}
+            <Badge tone={status.repositorySelection === 'all' ? 'muted' : 'warn'}>
+              {status.repositorySelection === 'all'
+                ? t('gh.repoAccessAll')
+                : t('gh.repoAccessSelected')}
+            </Badge>
+          {/if}
         </div>
         <p class="small muted">{t('gh.connectedBlurb')}</p>
+        {#if status.repositorySelection === 'selected'}
+          <p class="small muted">{t('gh.selectedNote')}</p>
+        {/if}
+        {#if status.installationUrl}
+          <p class="small">
+            <a href={status.installationUrl} target="_blank" rel="noreferrer noopener">
+              {t('gh.manageAccess')} ↗
+            </a>
+          </p>
+        {/if}
       </div>
     </div>
   {:else if status.error}
@@ -303,7 +320,9 @@
 {/if}
 
 <style>
-  .connected { display: flex; align-items: center; gap: 12px; }
+  /* align-items: flex-start, because the account block can now run to
+     several lines and a centred avatar would float in the middle of them. */
+  .connected { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
   .connected img { border-radius: 50%; }
   .connected p { margin: 3px 0 0; max-width: 62ch; }
 

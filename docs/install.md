@@ -121,7 +121,18 @@ Repository permissions:
 Then **Install** the App on the account or organisation whose repositories
 you want to deploy, and paste the App ID and the private key into
 Settings → GitHub. publix finds the installation itself when there is only
-one.
+one; with several, paste the installation ID too — the error names them.
+
+> **Creating the App is not enough — installing it is a separate step, and
+> so is choosing what it can see.** An App with no repositories granted
+> connects successfully and shows an empty Import screen. If you picked
+> “Only select repositories”, only those appear; and if your repositories
+> belong to an organisation, the App has to be installed on *that
+> organisation*, not on your personal account.
+>
+> Settings → GitHub names the account the App is installed on and whether
+> it was given all or only selected repositories, and links straight to the
+> installation's settings on GitHub where that is changed.
 
 Both the webhook URL and its secret are shown on that page, with a copy
 button, precisely because an App's webhook is configured on the App rather

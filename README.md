@@ -79,7 +79,10 @@ and ports 80 and 443 open. Then, in the dashboard:
    need `repo`; fine-grained ones need Contents, Metadata, Webhooks and
    Commit statuses) or a GitHub App, which is the right choice for an
    organisation. A GitHub App needs no Callback URL — publix has no OAuth
-   login — only the webhook URL and secret shown on that page. See
+   login — only the webhook URL and secret shown on that page. Remember to
+   **install** the App on the account or organisation and grant it the
+   repositories: creating it is a separate step from installing it, and an
+   installation with nothing granted shows an empty Import screen. See
    [docs/install.md](docs/install.md#connecting-a-github-app).
 3. **Import** — pick a repository. publix inspects it, shows you what it
    worked out, and deploys it.

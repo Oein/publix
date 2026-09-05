@@ -235,6 +235,10 @@ export default {
   'import.noReposDesc':
     'The connected credentials cannot see any repositories. A fine-grained token needs explicit repository access; a GitHub App needs to be installed on the account.',
   'import.reviewSettings': 'Review GitHub settings',
+  'import.noReposAppTitle': 'The App cannot see any repositories',
+  'import.noReposAppDesc':
+    'It is installed on {account}, but that installation has not been given access to any repository. Open its settings on GitHub and add the ones you want to deploy. If your repositories belong to an organisation, the App has to be installed on the organisation itself, not on your personal account.',
+  'import.manageAccess': 'Manage repository access',
   'import.noMatchTitle': 'Nothing matches “{query}”',
   'import.noMatchDesc': 'Try a different search.',
   'import.private': 'Private',
@@ -394,6 +398,11 @@ export default {
   'gh.token': 'Access token',
   'gh.connectedBlurb':
     'Repositories are listed on the Import screen. Pushes deploy automatically for projects with a webhook.',
+  'gh.repoAccessAll': 'All repositories',
+  'gh.repoAccessSelected': 'Selected repositories',
+  'gh.manageAccess': 'Manage repository access',
+  'gh.selectedNote':
+    'publix only sees the repositories this installation was given. If one is missing from the import list, add it there.',
   'gh.rejected': 'GitHub rejected the stored credentials',
   'gh.tokenMode': 'Personal access token',
   'gh.tokenModeHint': 'Fastest to set up. Sees whatever your account can see.',

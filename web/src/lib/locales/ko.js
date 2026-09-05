@@ -230,6 +230,10 @@ export default {
   'import.noReposDesc':
     '연결된 자격 증명으로 볼 수 있는 저장소가 없습니다. 세분화된 토큰은 저장소 접근 권한을 명시해야 하고, GitHub App은 계정에 설치되어 있어야 합니다.',
   'import.reviewSettings': 'GitHub 설정 살펴보기',
+  'import.noReposAppTitle': 'App이 볼 수 있는 저장소가 없습니다',
+  'import.noReposAppDesc':
+    '{account} 에 설치되어 있지만, 이 설치에 접근 권한이 부여된 저장소가 하나도 없습니다. GitHub에서 설치 설정을 열고 배포할 저장소를 추가하세요. 저장소가 조직 소유라면 개인 계정이 아니라 그 조직에 App을 설치해야 합니다.',
+  'import.manageAccess': '저장소 접근 권한 관리',
   'import.noMatchTitle': '“{query}” 에 맞는 결과가 없습니다',
   'import.noMatchDesc': '다른 검색어를 써 보세요.',
   'import.private': '비공개',
@@ -388,6 +392,11 @@ export default {
   'gh.token': '액세스 토큰',
   'gh.connectedBlurb':
     '저장소는 가져오기 화면에 나열됩니다. 웹훅이 있는 프로젝트는 푸시할 때 자동으로 배포됩니다.',
+  'gh.repoAccessAll': '모든 저장소',
+  'gh.repoAccessSelected': '선택한 저장소',
+  'gh.manageAccess': '저장소 접근 권한 관리',
+  'gh.selectedNote':
+    'publix는 이 설치에 권한이 부여된 저장소만 봅니다. 가져오기 목록에 없는 저장소가 있으면 거기에서 추가하세요.',
   'gh.rejected': 'GitHub가 저장된 자격 증명을 거부했습니다',
   'gh.tokenMode': '개인 액세스 토큰',
   'gh.tokenModeHint': '설정이 가장 빠릅니다. 계정이 볼 수 있는 것은 모두 봅니다.',
