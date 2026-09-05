@@ -57,7 +57,9 @@ duplicates.
 1. Installs `ca-certificates`, `curl` and `git`.
 2. Installs Docker from Docker's own apt repository, unless it is already
    there. Pass `--skip-docker` if you install it another way.
-3. Clones the repository to `/opt/publix`.
+3. Clones the repository to `/opt/publix`, or fetches the latest `main` into
+   it if it is already there. Run from inside a checkout instead, and it
+   installs that checkout without fetching — see [Upgrading](#upgrading).
 4. Creates `/var/lib/publix` (mode 0700 — it holds your GitHub token and
    every project's secrets) and `/etc/traefik/dynamic`.
 5. Creates the `publix` Docker network that Traefik and every project share.
@@ -263,11 +265,40 @@ down is corrected.
 
 ### Upgrading
 
-Re-run the installer. It fetches, rebuilds and restarts:
+Re-run the one-liner. Piped from curl it fetches the latest `main` into
+`/opt/publix`, rebuilds the image and restarts:
 
 ```bash
-sudo /opt/publix/scripts/install.sh --email you@example.com
+curl -fsSL https://raw.githubusercontent.com/Oein/publix/main/scripts/install.sh \
+  | sudo bash -s -- --email you@example.com
 ```
+
+Or do it by hand, which is the same three steps:
+
+```bash
+cd /opt/publix
+sudo git pull
+sudo docker compose -f deploy/docker-compose.yml build --pull
+sudo docker compose -f deploy/docker-compose.yml up -d
+```
+
+Running `/opt/publix/scripts/install.sh` directly does **not** fetch. A
+script run from inside a checkout installs *that* checkout, so that testing
+a local change does not silently replace it with `main`. Use it when you
+have already pulled, or to try a branch:
+
+```bash
+cd /opt/publix
+sudo git fetch origin && sudo git checkout -B some-branch origin/some-branch
+sudo ./scripts/install.sh --email you@example.com
+```
+
+Your projects, settings and secrets live in `/var/lib/publix` and are
+untouched by an upgrade. Running containers keep serving while the new image
+builds; only publix itself restarts, and on startup it rewrites Traefik's
+routing from its own state. The dashboard's HTML is served `no-cache` with
+fingerprinted assets, so a normal page load picks up the new build — no hard
+refresh needed.
 
 ### Backing up
 
