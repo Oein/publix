@@ -15,3 +15,6 @@ node_modules/
 # Local state
 .publix/
 *.local.yaml
+
+# Written by scripts/install.sh; holds the operator's ACME email.
+/deploy/.env

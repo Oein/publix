@@ -1,0 +1,11 @@
+# The dashboard is built inside the image; a local build would only shadow
+# it with something possibly stale.
+internal/api/dist/
+web/node_modules/
+web/dist/
+
+.git/
+publix
+*.test
+docs/
+examples/

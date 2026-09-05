@@ -10,11 +10,17 @@ out how to build it, builds it, health-checks it, moves traffic to it
 atomically, and gives you a URL — with rollback, logs, environment
 variables and shared storage in the same place.
 
-```
-publix serve
+```bash
+curl -fsSL https://raw.githubusercontent.com/Oein/publix/main/scripts/install.sh \
+  | sudo bash -s -- --email you@example.com --dashboard publix.example.com
 ```
 
-Then open the dashboard, set a password, connect GitHub, and press Import.
+On a bare Ubuntu server that is the whole installation: it brings up Docker,
+builds publix, and starts it behind Traefik. Then open the dashboard, set a
+password, connect GitHub, and press Import.
+
+Full instructions, including what to point at the server, are in
+[docs/install.md](docs/install.md).
 
 ---
 
@@ -56,72 +62,26 @@ the other's files.
 
 ## Getting started
 
-### 1. Traefik
+The installer above is the short path. It needs two DNS records pointing at
+the server:
 
-publix writes into Traefik's file-provider directory and expects its Docker
-provider to be on. A minimal `traefik.yml`:
+| Record | Purpose |
+| --- | --- |
+| `publix.example.com` | the dashboard |
+| `*.apps.example.com` | a URL for every project, automatically |
 
-```yaml
-entryPoints:
-  web:
-    address: ":80"
-    http:
-      redirections:
-        entryPoint: { to: websecure, scheme: https }
-  websecure:
-    address: ":443"
+and ports 80 and 443 open. Then, in the dashboard:
 
-providers:
-  docker:
-    exposedByDefault: false
-    network: publix
-  file:
-    directory: /etc/traefik/dynamic
-    watch: true
+1. **Settings → Server** — set the apps domain and the public URL.
+2. **Settings → GitHub** — connect a personal access token (classic tokens
+   need `repo`; fine-grained ones need Contents, Metadata, Webhooks and
+   Commit statuses) or a GitHub App, which is the right choice for an
+   organisation.
+3. **Import** — pick a repository. publix inspects it, shows you what it
+   worked out, and deploys it.
 
-certificatesResolvers:
-  letsencrypt:
-    acme:
-      email: you@example.com
-      storage: /etc/traefik/acme.json
-      httpChallenge: { entryPoint: web }
-```
-
-Create the shared network once:
-
-```
-docker network create publix
-```
-
-### 2. publix
-
-```
-go build -o publix ./cmd/publix
-sudo ./publix serve --addr 127.0.0.1:4321
-```
-
-Open the dashboard, choose a password, then under **Settings → Server** set:
-
-- **Apps domain** — a wildcard domain such as `apps.example.com`, pointed at
-  this host. Every project then gets a working URL immediately, before you
-  configure a custom domain.
-- **Public URL** — where the dashboard is reachable. GitHub webhooks are
-  pointed here, so deploy-on-push needs it.
-
-### 3. GitHub
-
-Under **Settings → GitHub**, connect either:
-
-- a **personal access token** — fastest; classic tokens need the `repo`
-  scope, fine-grained tokens need Contents (read), Metadata (read), Webhooks
-  (read/write) and Commit statuses (write); or
-- a **GitHub App** — right for an organisation: scoped per repository, and
-  its tokens rotate on their own.
-
-Your repositories then appear under **Import**. Press Import on one and
-publix inspects it, shows you what it worked out, and deploys it.
-
----
+To run publix on the host instead of in a container, or alongside a Traefik
+you already operate, see [docs/install.md](docs/install.md).
 
 ## deployment.yaml
 
@@ -449,10 +409,16 @@ produces one self-contained file with no assets to deploy alongside it.
 
 ## Requirements
 
+Installed with the script above, nothing is needed but a fresh Ubuntu or
+Debian server — it installs Docker and everything else itself.
+
+Running publix another way, it needs:
+
 - Docker 20.10 or newer, reachable via `DOCKER_HOST` or the standard socket
 - Traefik v2 or v3, with the Docker provider and a watched file provider
-- `git` on the host, and `docker compose` for Compose projects
-- Go 1.24 and Node 20+ to build from source
+  whose directory publix can write to
+- `git`, and `docker compose` for Compose projects
+- Go 1.24 and Node 20+ only to build from source
 
 ## Security notes
 
