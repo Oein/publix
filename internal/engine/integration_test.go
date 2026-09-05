@@ -405,9 +405,9 @@ func TestImageRetentionKeepsTwo(t *testing.T) {
 	}
 }
 
-// A shared volume must land in the project's own subdirectory, and two
-// projects must not be able to see each other's files through it.
-func TestSharedVolumeIsolation(t *testing.T) {
+// A project-scoped volume must land in the project's own subdirectory, and
+// two projects must not be able to see each other's files through it.
+func TestProjectVolumeIsolation(t *testing.T) {
 	h := newHarness(t)
 
 	volRoot := filepath.Join(h.home, "shared")
@@ -415,7 +415,7 @@ func TestSharedVolumeIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := h.store.SetSettings(func(s *store.Settings) error {
-		s.SharedVolumes = []store.SharedVolume{{Name: "disk0", Path: volRoot}}
+		s.Volumes = []store.Volume{{Name: "disk0", Path: volRoot, Scope: store.ScopeProject}}
 		return nil
 	}); err != nil {
 		t.Fatal(err)

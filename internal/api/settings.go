@@ -18,25 +18,28 @@ import (
 // are never included: the browser has no use for them, and a value that is
 // never sent cannot be leaked by a screenshot or a browser extension.
 type settingsView struct {
-	Network           string             `json:"network"`
-	TraefikDynamicDir string             `json:"traefikDynamicDir"`
-	TraefikFile       string             `json:"traefikFile"`
-	EntryPoints       []string           `json:"entryPoints"`
-	CertResolver      string             `json:"certResolver"`
-	AppsDomain        string             `json:"appsDomain"`
-	PublicURL         string             `json:"publicUrl"`
-	WorkDir           string             `json:"workDir"`
-	KeepImages        int                `json:"keepImages"`
-	KeepDeployments   int                `json:"keepDeployments"`
-	BuildConcurrency  int                `json:"buildConcurrency"`
-	SharedVolumes     []sharedVolumeView `json:"sharedVolumes"`
+	Network           string       `json:"network"`
+	TraefikDynamicDir string       `json:"traefikDynamicDir"`
+	TraefikFile       string       `json:"traefikFile"`
+	EntryPoints       []string     `json:"entryPoints"`
+	CertResolver      string       `json:"certResolver"`
+	AppsDomain        string       `json:"appsDomain"`
+	PublicURL         string       `json:"publicUrl"`
+	WorkDir           string       `json:"workDir"`
+	KeepImages        int          `json:"keepImages"`
+	KeepDeployments   int          `json:"keepDeployments"`
+	BuildConcurrency  int          `json:"buildConcurrency"`
+	Volumes           []volumeView `json:"volumes"`
 }
 
-// sharedVolumeView annotates a registered volume with what it is being used
-// for, so unregistering one is an informed decision.
-type sharedVolumeView struct {
-	store.SharedVolume
-	Mount    string   `json:"mount"`
+// volumeView annotates a registered volume with what it is being used for,
+// so unregistering one is an informed decision.
+type volumeView struct {
+	store.Volume
+	Mount string `json:"mount"`
+	// Example is the host directory a project actually gets, which is the
+	// clearest way to show what a scope means.
+	Example  string   `json:"example"`
 	UsedBy   []string `json:"usedBy"`
 	Writable bool     `json:"writable"`
 	Exists   bool     `json:"exists"`
@@ -57,11 +60,16 @@ func (s *Server) settingsView() settingsView {
 		KeepImages:        set.KeepImages,
 		KeepDeployments:   set.KeepDeployments,
 		BuildConcurrency:  set.BuildConcurrency,
-		SharedVolumes:     []sharedVolumeView{},
+		Volumes:           []volumeView{},
 	}
 	projects := s.store.Projects()
-	for _, sv := range set.SharedVolumes {
-		view := sharedVolumeView{SharedVolume: sv, Mount: sv.Mount(), UsedBy: engine.VolumeUsage(projects, sv.Name)}
+	for _, sv := range set.Volumes {
+		view := volumeView{
+			Volume:  sv,
+			Mount:   sv.Mount(),
+			Example: sv.Dir("<project id>"),
+			UsedBy:  engine.VolumeUsage(projects, sv.Name),
+		}
 		if view.UsedBy == nil {
 			view.UsedBy = []string{}
 		}
@@ -74,7 +82,7 @@ func (s *Server) settingsView() settingsView {
 		} else {
 			view.Error = "this directory does not exist on the host"
 		}
-		v.SharedVolumes = append(v.SharedVolumes, view)
+		v.Volumes = append(v.Volumes, view)
 	}
 	return v
 }
@@ -187,11 +195,12 @@ func (s *Server) handleSetSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.settingsView())
 }
 
-// handleAddVolume registers a shared volume.
+// handleAddVolume registers a volume.
 func (s *Server) handleAddVolume(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name         string `json:"name"`
 		Path         string `json:"path"`
+		Scope        string `json:"scope"`
 		Description  string `json:"description"`
 		ReadOnly     bool   `json:"readOnly"`
 		DefaultMount string `json:"defaultMount"`
@@ -203,9 +212,17 @@ func (s *Server) handleAddVolume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	v := store.SharedVolume{
+	scope := store.VolumeScope(strings.TrimSpace(body.Scope))
+	if scope == "" {
+		// Per-project is the safe default: it is the one that cannot let
+		// a new project read or overwrite an existing one's data.
+		scope = store.ScopeProject
+	}
+
+	v := store.Volume{
 		Name:         strings.TrimSpace(body.Name),
 		Path:         filepath.Clean(strings.TrimSpace(body.Path)),
+		Scope:        scope,
 		Description:  strings.TrimSpace(body.Description),
 		ReadOnly:     body.ReadOnly,
 		DefaultMount: strings.TrimSpace(body.DefaultMount),
@@ -239,7 +256,7 @@ func (s *Server) handleAddVolume(w http.ResponseWriter, r *http.Request) {
 		if err := set.ValidateVolume(v, ""); err != nil {
 			return err
 		}
-		set.SharedVolumes = append(set.SharedVolumes, v)
+		set.Volumes = append(set.Volumes, v)
 		return nil
 	}); err != nil {
 		writeError(w, http.StatusConflict, err)
@@ -248,7 +265,7 @@ func (s *Server) handleAddVolume(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, s.settingsView())
 }
 
-// handleDeleteVolume unregisters a shared volume. The host directory and
+// handleDeleteVolume unregisters a volume. The host directory and
 // everything in it is left alone: unregistering is a configuration change,
 // not a request to delete data.
 func (s *Server) handleDeleteVolume(w http.ResponseWriter, r *http.Request) {
@@ -263,22 +280,22 @@ func (s *Server) handleDeleteVolume(w http.ResponseWriter, r *http.Request) {
 
 	var found bool
 	if err := s.store.SetSettings(func(set *store.Settings) error {
-		out := set.SharedVolumes[:0]
-		for _, v := range set.SharedVolumes {
+		out := set.Volumes[:0]
+		for _, v := range set.Volumes {
 			if v.Name == name {
 				found = true
 				continue
 			}
 			out = append(out, v)
 		}
-		set.SharedVolumes = out
+		set.Volumes = out
 		return nil
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	if !found {
-		writeError(w, http.StatusNotFound, fmt.Errorf("no shared volume named %q", name))
+		writeError(w, http.StatusNotFound, fmt.Errorf("no volume named %q", name))
 		return
 	}
 	writeJSON(w, http.StatusOK, s.settingsView())

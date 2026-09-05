@@ -97,7 +97,7 @@
   </Card>
 
   {#if project.volumes?.length}
-    <Card title="Shared volumes" description="Server volumes this project mounts.">
+    <Card title="Volumes" description="Server volumes this project mounts.">
       <ul class="vols">
         {#each project.volumes as vol}
           <li>
@@ -107,8 +107,9 @@
         {/each}
       </ul>
       <p class="muted small note">
-        Each project gets its own directory on a shared volume, named after its project ID
-        (<code>{project.id}</code>). Other projects cannot read it.
+        A project volume gives this project its own directory, named after its project ID
+        (<code>{project.id}</code>), which other projects cannot read. A shared volume is one
+        directory every project mounting it reads and writes.
       </p>
     </Card>
   {/if}

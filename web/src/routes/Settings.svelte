@@ -12,7 +12,7 @@
 
   const tabs = [
     { key: 'server', label: 'Server' },
-    { key: 'volumes', label: 'Shared volumes' },
+    { key: 'volumes', label: 'Volumes' },
     { key: 'github', label: 'GitHub' },
     { key: 'account', label: 'Account' },
   ];

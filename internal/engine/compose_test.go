@@ -157,15 +157,15 @@ volumes:
 	}
 }
 
-// A shared volume must reach a compose service too.
-func TestComposeSharedVolume(t *testing.T) {
+// A registered volume must reach a compose service too.
+func TestComposeVolume(t *testing.T) {
 	h := newHarness(t)
 	volRoot := filepath.Join(h.home, "shared")
 	if err := os.MkdirAll(volRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.store.SetSettings(func(s *store.Settings) error {
-		s.SharedVolumes = []store.SharedVolume{{Name: "disk0", Path: volRoot}}
+		s.Volumes = []store.Volume{{Name: "disk0", Path: volRoot, Scope: store.ScopeProject}}
 		return nil
 	}); err != nil {
 		t.Fatal(err)

@@ -25,10 +25,14 @@
 
   let name = $state('');
   let path = $state('');
+  let scope = $state('project');
   let description = $state('');
   let readOnly = $state(false);
   let create = $state(true);
   let saving = $state(false);
+
+  const projectVolumes = $derived((settings?.volumes ?? []).filter((v) => v.scope !== 'shared'));
+  const sharedVolumes = $derived((settings?.volumes ?? []).filter((v) => v.scope === 'shared'));
 
   async function load() {
     try {
@@ -43,9 +47,10 @@
     load();
   });
 
-  function openAdd() {
+  function openAdd(kind) {
     name = '';
     path = '';
+    scope = kind;
     description = '';
     readOnly = false;
     create = true;
@@ -58,6 +63,7 @@
       settings = await api.settings.addVolume({
         name: name.trim(),
         path: path.trim(),
+        scope,
         description: description.trim(),
         readOnly,
         create,
@@ -82,12 +88,39 @@
   }
 </script>
 
+{#snippet volumeRow(vol)}
+  <li>
+    <div class="grow">
+      <div class="row wrap">
+        <code class="vname">{vol.name}</code>
+        {#if vol.readOnly}<Badge tone="muted">Read-only</Badge>{/if}
+        {#if vol.error}<Badge tone="bad">{vol.error}</Badge>{/if}
+      </div>
+      <div class="paths small">
+        <span class="faint">host</span>
+        <code>{vol.example}</code>
+        <span class="faint">→</span>
+        <code>{vol.mount}</code>
+      </div>
+      {#if vol.description}<p class="muted small desc">{vol.description}</p>{/if}
+      <div class="small faint used">
+        {#if vol.usedBy.length}
+          Used by {vol.usedBy.join(', ')}
+        {:else}
+          Not used by any project
+        {/if}
+      </div>
+    </div>
+    <Button size="sm" variant="danger" onclick={() => (removing = vol)}>Unregister</Button>
+  </li>
+{/snippet}
+
 <Card
-  title="Shared volumes"
-  description="Host directories you make available to projects."
+  title="Project volumes"
+  description="Storage a project keeps to itself."
 >
   {#snippet actions()}
-    <Button size="sm" variant="primary" onclick={openAdd}>Register volume</Button>
+    <Button size="sm" variant="primary" onclick={() => openAdd('project')}>Register volume</Button>
   {/snippet}
 
   <div class="explain">
@@ -99,61 +132,77 @@
     </p>
     <p class="small muted">
       The per-project subdirectory is the isolation boundary: two projects can both mount
-      <code>disk0</code> and neither can reach the other's files.
+      <code>disk0</code> and neither can reach the other's files. The project ID never changes,
+      so renaming a project cannot orphan or expose its data.
     </p>
   </div>
 
   {#if settings === null}
     <p class="muted small">Loading…</p>
-  {:else if settings.sharedVolumes.length === 0}
+  {:else if projectVolumes.length === 0}
     <Empty
-      title="No shared volumes"
-      description="Register a directory and projects can persist data across deployments — uploads, caches, databases."
+      title="No project volumes"
+      description="Register a directory and projects can persist data across deployments — uploads, caches, databases — each in its own place."
     >
-      <Button variant="primary" onclick={openAdd}>Register a volume</Button>
+      <Button variant="primary" onclick={() => openAdd('project')}>Register a volume</Button>
     </Empty>
   {:else}
     <ul class="vols">
-      {#each settings.sharedVolumes as vol (vol.name)}
-        <li>
-          <div class="grow">
-            <div class="row wrap">
-              <code class="vname">{vol.name}</code>
-              {#if vol.readOnly}<Badge tone="muted">Read-only</Badge>{/if}
-              {#if vol.error}<Badge tone="bad">{vol.error}</Badge>{/if}
-            </div>
-            <div class="paths small">
-              <span class="faint">host</span>
-              <code>{vol.path}/&lt;project id&gt;</code>
-              <span class="faint">→</span>
-              <code>{vol.mount}</code>
-            </div>
-            {#if vol.description}<p class="muted small desc">{vol.description}</p>{/if}
-            <div class="small faint used">
-              {#if vol.usedBy.length}
-                Used by {vol.usedBy.join(', ')}
-              {:else}
-                Not used by any project
-              {/if}
-            </div>
-          </div>
-          <Button size="sm" variant="danger" onclick={() => (removing = vol)}>Unregister</Button>
-        </li>
-      {/each}
+      {#each projectVolumes as vol (vol.name)}{@render volumeRow(vol)}{/each}
+    </ul>
+  {/if}
+</Card>
+
+<Card
+  title="Shared volumes"
+  description="One directory that every project mounting it reads and writes."
+>
+  {#snippet actions()}
+    <Button size="sm" onclick={() => openAdd('shared')}>Register volume</Button>
+  {/snippet}
+
+  <div class="explain warn">
+    <p class="small">
+      Every project that mounts a shared volume gets the <em>same</em> directory —
+      <code class="path">&lt;host path&gt;</code>, with no per-project subdirectory. That is the
+      point: a media library, a dataset, a common cache.
+    </p>
+    <p class="small muted">
+      It also means there is no isolation. Any project mounting it can read, overwrite or delete
+      what another one wrote. Mark it read-only if the projects using it only need to read.
+    </p>
+  </div>
+
+  {#if settings === null}
+    <p class="muted small">Loading…</p>
+  {:else if sharedVolumes.length === 0}
+    <Empty
+      title="No shared volumes"
+      description="Register one when several projects genuinely need the same files. If they each need their own storage, use a project volume instead."
+    >
+      <Button onclick={() => openAdd('shared')}>Register a shared volume</Button>
+    </Empty>
+  {:else}
+    <ul class="vols">
+      {#each sharedVolumes as vol (vol.name)}{@render volumeRow(vol)}{/each}
     </ul>
   {/if}
 </Card>
 
 <Card title="Using a volume in a project">
+  <p class="muted small">
+    A project names a volume the same way whichever kind it is — the scope is the server's
+    decision, not the repository's:
+  </p>
   <pre class="mono">{`volumes:
   - disk0                  # mounts at /shared/disk0
 
-  - name: uploads
-    mountPath: /var/data   # somewhere else
-    readOnly: false
+  - name: media
+    mountPath: /var/media  # somewhere else
+    readOnly: true         # sensible for a shared library
 
   - name: disk0
-    subPath: cache         # a subdirectory of this project's own area`}</pre>
+    subPath: cache         # a subdirectory of what this project gets`}</pre>
   <p class="muted small">
     Asking for a volume the server has not registered fails the deploy with a message naming it,
     rather than starting the app with a missing directory.
@@ -161,7 +210,10 @@
 </Card>
 
 {#if adding}
-  <Modal title="Register a shared volume" onclose={() => (adding = false)}>
+  <Modal
+    title={scope === 'shared' ? 'Register a shared volume' : 'Register a project volume'}
+    onclose={() => (adding = false)}
+  >
     <div class="form">
       <Field label="Name" hint="What projects write in deployment.yaml." required>
         {#snippet children(id)}
@@ -171,7 +223,9 @@
 
       <Field
         label="Host path"
-        hint="publix creates one subdirectory per project inside it. Never point this at a system directory."
+        hint={scope === 'shared'
+          ? 'Every project that mounts this volume gets this directory itself. Never point it at a system directory.'
+          : 'publix creates one subdirectory per project inside it. Never point this at a system directory.'}
         required
       >
         {#snippet children(id)}
@@ -199,9 +253,16 @@
       </label>
 
       {#if name.trim() && path.trim()}
-        <div class="preview small">
-          A project with ID <code>abcd1234</code> would see
-          <code>{path.trim()}/abcd1234</code> at <code>/shared/{name.trim()}</code>.
+        <div class="preview small" class:sharedPreview={scope === 'shared'}>
+          {#if scope === 'shared'}
+            <strong>Every</strong> project that mounts this sees
+            <code>{path.trim()}</code> at <code>/shared/{name.trim()}</code> — the same files,
+            with no isolation between them.
+          {:else}
+            A project with ID <code>abcd1234</code> would see
+            <code>{path.trim()}/abcd1234</code> at <code>/shared/{name.trim()}</code>. Another
+            project mounting the same volume gets its own directory.
+          {/if}
         </div>
       {/if}
     </div>
@@ -234,6 +295,9 @@
     border-radius: var(--radius-sm);
     border-left: 3px solid var(--accent);
   }
+  /* A shared volume trades away isolation, so its explanation is marked
+     as the caution it is rather than reading like the other one. */
+  .explain.warn { border-left-color: var(--warn); background: var(--warn-bg); }
   .explain p { margin: 0 0 6px; line-height: 1.55; }
   .explain p:last-child { margin-bottom: 0; }
 
@@ -274,6 +338,7 @@
     border-radius: var(--radius-sm);
     line-height: 1.6;
   }
+  .preview.sharedPreview { background: var(--warn-bg); color: var(--warn); }
   .preview code { background: var(--bg-raised); }
 
   pre {

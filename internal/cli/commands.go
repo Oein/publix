@@ -247,8 +247,9 @@ func cmdLogs(ctx context.Context, args []string) error {
 
 func cmdVolumes(ctx context.Context, args []string) error {
 	fs := flagSet("volumes")
-	add := fs.String("add", "", "register a shared volume as name=/host/path")
-	remove := fs.String("rm", "", "unregister a shared volume by name")
+	add := fs.String("add", "", "register a volume as name=/host/path")
+	shared := fs.Bool("shared", false, "every project mounts the same directory, rather than one of its own")
+	remove := fs.String("rm", "", "unregister a volume by name")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}
@@ -263,7 +264,15 @@ func cmdVolumes(ctx context.Context, args []string) error {
 		if !ok {
 			return fmt.Errorf("usage: publix volumes -add name=/host/path")
 		}
-		v := store.SharedVolume{Name: strings.TrimSpace(name), Path: filepath.Clean(strings.TrimSpace(path))}
+		scope := store.ScopeProject
+		if *shared {
+			scope = store.ScopeShared
+		}
+		v := store.Volume{
+			Name:  strings.TrimSpace(name),
+			Path:  filepath.Clean(strings.TrimSpace(path)),
+			Scope: scope,
+		}
 		set := st.Settings()
 		if err := set.ValidateVolume(v, ""); err != nil {
 			return err
@@ -275,12 +284,17 @@ func cmdVolumes(ctx context.Context, args []string) error {
 			if err := set.ValidateVolume(v, ""); err != nil {
 				return err
 			}
-			set.SharedVolumes = append(set.SharedVolumes, v)
+			set.Volumes = append(set.Volumes, v)
 			return nil
 		}); err != nil {
 			return err
 		}
 		fmt.Printf("Registered %q at %s. Projects mount it at %s.\n", v.Name, v.Path, v.Mount())
+		if v.Shared() {
+			fmt.Printf("Every project that mounts it reads and writes the same directory.\n")
+		} else {
+			fmt.Printf("Each project gets its own directory: %s\n", v.Dir("<project id>"))
+		}
 		return nil
 
 	case *remove != "":
@@ -289,45 +303,47 @@ func cmdVolumes(ctx context.Context, args []string) error {
 		}
 		found := false
 		if err := st.SetSettings(func(set *store.Settings) error {
-			out := set.SharedVolumes[:0]
-			for _, v := range set.SharedVolumes {
+			out := set.Volumes[:0]
+			for _, v := range set.Volumes {
 				if v.Name == *remove {
 					found = true
 					continue
 				}
 				out = append(out, v)
 			}
-			set.SharedVolumes = out
+			set.Volumes = out
 			return nil
 		}); err != nil {
 			return err
 		}
 		if !found {
-			return fmt.Errorf("no shared volume named %q", *remove)
+			return fmt.Errorf("no volume named %q", *remove)
 		}
 		fmt.Printf("Unregistered %q. Its data on disk was left untouched.\n", *remove)
 		return nil
 	}
 
 	set := st.Settings()
-	if len(set.SharedVolumes) == 0 {
-		fmt.Println("No shared volumes registered.")
+	if len(set.Volumes) == 0 {
+		fmt.Println("No volumes registered.")
 		fmt.Println("\nRegister one with:  publix volumes -add disk0=/mnt/data")
+		fmt.Println("Add -shared to have every project mount the same directory.")
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tHOST PATH\tMOUNTS AT\tUSED BY")
+	fmt.Fprintln(tw, "NAME\tSCOPE\tHOST PATH\tMOUNTS AT\tUSED BY")
 	projects := st.Projects()
-	for _, v := range set.SharedVolumes {
+	for _, v := range set.Volumes {
 		users := engine.VolumeUsage(projects, v.Name)
 		used := "—"
 		if len(users) > 0 {
 			used = strings.Join(users, ", ")
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", v.Name, v.Path, v.Mount(), used)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", v.Name, v.Scope, v.Dir("<project id>"), v.Mount(), used)
 	}
 	tw.Flush()
-	fmt.Printf("\nEach project sees its own directory: <host path>/<project id>\n")
+	fmt.Printf("\nproject  each project gets its own directory inside the host path\n")
+	fmt.Printf("shared   every project reads and writes the same directory\n")
 	return nil
 }
 

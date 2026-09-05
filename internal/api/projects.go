@@ -273,8 +273,12 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 
 	set := s.store.Settings()
 	var kept []string
-	for _, v := range set.SharedVolumes {
-		kept = append(kept, fmt.Sprintf("%s (%s)", v.Name, v.ProjectDir(p.ID)))
+	for _, v := range set.Volumes {
+		// A shared volume's directory is not this project's to report as
+		// retained: it was never only theirs.
+		if !v.Shared() {
+			kept = append(kept, fmt.Sprintf("%s (%s)", v.Name, v.Dir(p.ID)))
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":       true,

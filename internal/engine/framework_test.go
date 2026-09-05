@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -201,5 +203,74 @@ func TestUnbuildableProjectFailsWithGuidance(t *testing.T) {
 	}
 	if len(containers) != 0 {
 		t.Errorf("a failed detection left %d containers behind", len(containers))
+	}
+}
+
+// A shared volume gives every project the same directory. This is the
+// opposite guarantee from a project-scoped one, so it is worth proving
+// against real containers rather than trusting the path arithmetic.
+func TestSharedScopeVolumeIsVisibleToEveryProject(t *testing.T) {
+	h := newHarness(t)
+
+	shared := filepath.Join(h.home, "media")
+	perProject := filepath.Join(h.home, "data")
+	for _, d := range []string{shared, perProject} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := h.store.SetSettings(func(s *store.Settings) error {
+		s.Volumes = []store.Volume{
+			{Name: "media", Path: shared, Scope: store.ScopeShared},
+			{Name: "data", Path: perProject, Scope: store.ScopeProject},
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	spec := "port: 80\nvolumes: [media, data]\nrelease:\n  drain: 0s\n"
+	dockerfile := "FROM nginx:alpine\n"
+	a := h.project("alpha", map[string]string{"deployment.yaml": spec, "Dockerfile": dockerfile})
+	b := h.project("beta", map[string]string{"deployment.yaml": spec, "Dockerfile": dockerfile})
+
+	h.mustSucceed(h.deploy(a, Options{Trigger: "test"}))
+	h.mustSucceed(h.deploy(b, Options{Trigger: "test"}))
+
+	ctx := context.Background()
+	alphaC := h.oneContainer(ctx, a.ID)
+	betaC := h.oneContainer(ctx, b.ID)
+
+	// Written to the shared volume by one project, readable by the other.
+	if _, err := h.docker.Exec(ctx, alphaC, []string{"sh", "-c", "echo from-alpha > /shared/media/note"}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := h.docker.Exec(ctx, betaC, []string{"sh", "-c", "cat /shared/media/note 2>&1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Stdout, "from-alpha") {
+		t.Errorf("beta cannot read alpha's file on the shared volume: %q", res.Stdout+res.Stderr)
+	}
+
+	// The shared directory is the volume root itself, with no project
+	// subdirectory in the way.
+	if _, err := os.Stat(filepath.Join(shared, "note")); err != nil {
+		t.Errorf("the shared volume should hold the file at its root: %v", err)
+	}
+
+	// And the project-scoped volume alongside it still isolates.
+	if _, err := h.docker.Exec(ctx, alphaC, []string{"sh", "-c", "echo private > /shared/data/secret"}); err != nil {
+		t.Fatal(err)
+	}
+	res, err = h.docker.Exec(ctx, betaC, []string{"sh", "-c", "ls /shared/data"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Stdout, "secret") {
+		t.Errorf("beta can see alpha's file on a project-scoped volume: %q", res.Stdout)
+	}
+	if _, err := os.Stat(filepath.Join(perProject, a.ID, "secret")); err != nil {
+		t.Errorf("the project-scoped file should be under the project's own directory: %v", err)
 	}
 }

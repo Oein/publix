@@ -34,9 +34,14 @@ type Settings struct {
 	// "apps.example.com" yields "<project>.apps.example.com".
 	AppsDomain string `json:"appsDomain,omitempty"`
 
-	// SharedVolumes are host directories the operator has made available to
-	// projects. See SharedVolume for the isolation model.
-	SharedVolumes []SharedVolume `json:"sharedVolumes,omitempty"`
+	// Volumes are host directories the operator has made available to
+	// projects. See Volume for the two scopes and what each guarantees.
+	Volumes []Volume `json:"volumes,omitempty"`
+
+	// LegacySharedVolumes is where volumes lived before they had a scope.
+	// It is migrated into Volumes on load and then left empty; the field
+	// remains only so an older state file still opens.
+	LegacySharedVolumes []Volume `json:"sharedVolumes,omitempty"`
 
 	// WorkDir is where publix keeps repository checkouts.
 	WorkDir string `json:"workDir"`
@@ -69,17 +74,38 @@ type Settings struct {
 	Auth AuthSettings `json:"auth,omitempty"`
 }
 
-// SharedVolume is a host directory the operator exposes to projects.
+// VolumeScope decides what a project actually gets when it mounts a volume.
+type VolumeScope string
+
+const (
+	// ScopeProject gives every project its own directory inside the
+	// volume, named after the project ID. Two projects can mount the same
+	// volume and neither can see the other's files. This is the default,
+	// and the right answer for a project's own uploads or cache.
+	ScopeProject VolumeScope = "project"
+
+	// ScopeShared mounts the volume's directory itself into every project
+	// that asks for it. They read and write the same files.
+	//
+	// There is no isolation here, deliberately: it is what makes a shared
+	// dataset, a media library or a common cache possible. It also means
+	// one project can destroy another's data, so it is never the default.
+	ScopeShared VolumeScope = "shared"
+)
+
+// Volume is a host directory the operator exposes to projects.
 //
-// Projects never name a host path. They ask for a volume by name, and
-// publix binds <Path>/<projectID> into the container. The per-project
-// subdirectory is not a convenience: it is the isolation boundary. Two
-// projects can both mount "disk0" and neither can see the other's files.
-type SharedVolume struct {
+// Projects never name a host path. They ask for a volume by name, and the
+// server decides which directory that resolves to — which is what keeps a
+// repository from reaching anywhere the operator did not offer.
+type Volume struct {
 	// Name is what projects reference in deployment.yaml, e.g. "disk0".
 	Name string `json:"name"`
-	// Path is the host directory publix creates project subdirectories in.
+	// Path is the host directory this volume is rooted at.
 	Path string `json:"path"`
+	// Scope decides whether projects get their own directory inside Path
+	// or all share Path itself.
+	Scope VolumeScope `json:"scope,omitempty"`
 	// Description is shown in the dashboard.
 	Description string `json:"description,omitempty"`
 	// ReadOnly forces every mount of this volume to be read-only.
@@ -88,17 +114,26 @@ type SharedVolume struct {
 	DefaultMount string `json:"defaultMount,omitempty"`
 }
 
+// Shared reports whether every project mounts the same directory.
+func (v Volume) Shared() bool { return v.Scope == ScopeShared }
+
 // Mount returns the in-container path this volume mounts at by default.
-func (v SharedVolume) Mount() string {
+func (v Volume) Mount() string {
 	if v.DefaultMount != "" {
 		return v.DefaultMount
 	}
 	return "/shared/" + v.Name
 }
 
-// ProjectDir returns the host directory belonging to one project on this
-// volume. This is the only host path a project's containers ever see.
-func (v SharedVolume) ProjectDir(projectID string) string {
+// Dir returns the host directory a project mounts from this volume.
+//
+// This is the only place the two scopes differ, and it is the whole of the
+// isolation model: a project-scoped volume resolves to a directory named
+// after the project, a shared one to the volume's own root.
+func (v Volume) Dir(projectID string) string {
+	if v.Shared() {
+		return v.Path
+	}
 	return filepath.Join(v.Path, projectID)
 }
 
@@ -154,22 +189,32 @@ func DefaultSettings() Settings {
 // TLSEnabled reports whether routes get certificates.
 func (s *Settings) TLSEnabled() bool { return s.CertResolver != "" }
 
-// Volume looks up a registered shared volume by name.
-func (s *Settings) Volume(name string) (SharedVolume, bool) {
-	for _, v := range s.SharedVolumes {
+// Volume looks up a registered volume by name.
+func (s *Settings) Volume(name string) (Volume, bool) {
+	for _, v := range s.Volumes {
 		if v.Name == name {
 			return v, true
 		}
 	}
-	return SharedVolume{}, false
+	return Volume{}, false
+}
+
+// VolumeNames lists every registered volume, for an error that needs to
+// say what is actually available.
+func (s *Settings) VolumeNames() []string {
+	out := make([]string, 0, len(s.Volumes))
+	for _, v := range s.Volumes {
+		out = append(out, v.Name)
+	}
+	return out
 }
 
 var volumeNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
 
-// ValidateVolume checks a shared volume registration before it is saved.
-// Getting this wrong exposes host paths to every project on the box, so the
-// checks are deliberately strict.
-func (s *Settings) ValidateVolume(v SharedVolume, editing string) error {
+// ValidateVolume checks a volume registration before it is saved. Getting
+// this wrong exposes host paths to every project on the box, so the checks
+// are deliberately strict.
+func (s *Settings) ValidateVolume(v Volume, editing string) error {
 	var errs []string
 	if !volumeNameRe.MatchString(v.Name) {
 		errs = append(errs, fmt.Sprintf("name %q must be lowercase alphanumeric with dots, dashes or underscores", v.Name))
@@ -190,26 +235,34 @@ func (s *Settings) ValidateVolume(v SharedVolume, editing string) error {
 	if v.DefaultMount != "" && !strings.HasPrefix(v.DefaultMount, "/") {
 		errs = append(errs, fmt.Sprintf("defaultMount %q must be an absolute path", v.DefaultMount))
 	}
-	for _, existing := range s.SharedVolumes {
+	switch v.Scope {
+	case ScopeProject, ScopeShared:
+	default:
+		errs = append(errs, fmt.Sprintf("scope %q is not one of project, shared", v.Scope))
+	}
+	for _, existing := range s.Volumes {
 		if existing.Name == v.Name && existing.Name != editing {
-			errs = append(errs, fmt.Sprintf("a shared volume named %q already exists", v.Name))
+			errs = append(errs, fmt.Sprintf("a volume named %q already exists", v.Name))
 		}
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("invalid shared volume:\n  - %s", strings.Join(errs, "\n  - "))
+		return fmt.Errorf("invalid volume:\n  - %s", strings.Join(errs, "\n  - "))
 	}
 	return nil
 }
 
-// EnsureProjectDir creates a project's directory on a shared volume.
-func (v SharedVolume) EnsureProjectDir(projectID string) (string, error) {
-	dir := v.ProjectDir(projectID)
+// EnsureDir creates the directory a project mounts from this volume.
+func (v Volume) EnsureDir(projectID string) (string, error) {
+	dir := v.Dir(projectID)
 	if err := os.MkdirAll(dir, 0o777); err != nil {
-		return "", fmt.Errorf("creating %s for shared volume %q: %w", dir, v.Name, err)
+		return "", fmt.Errorf("creating %s for volume %q: %w", dir, v.Name, err)
 	}
 	// The container's user is unknown and frequently non-root, so the
-	// directory has to be world-writable for the mount to be useful.
-	// It is isolated per project, which is what keeps that acceptable.
+	// directory has to be writable by whoever the image runs as.
+	//
+	// For a project-scoped volume that is contained: the directory belongs
+	// to one project. For a shared one it is the point — every project
+	// that mounts it writes to the same place.
 	if err := os.Chmod(dir, 0o777); err != nil {
 		return "", err
 	}

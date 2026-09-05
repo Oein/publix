@@ -53,10 +53,12 @@ the previous deployment needs no build at all. Anything older is rebuilt
 from its commit. Either way, the deployment's recorded configuration comes
 back with it — its domains and settings, not just its code.
 
-**Shared storage is safe by construction.** You register host directories on
-the server; projects ask for them *by name*. Each project receives its own
-subdirectory, so two projects can mount the same volume and neither can read
-the other's files.
+**Storage is the server's decision, not the repository's.** You register host
+directories; projects ask for them *by name* and never see a path. A
+**project volume** gives each project its own subdirectory, so two projects
+can mount the same one and neither can read the other's files. A **shared
+volume** gives every project the same directory, for a dataset or a media
+library they genuinely share.
 
 ---
 
@@ -221,25 +223,32 @@ Every container also receives `PORT`, `PUBLIX_COMMIT`, `PUBLIX_BRANCH`,
 Variables set in the dashboard override anything in `deployment.yaml`, so a
 repository can never override a production credential by editing a file.
 
-### Shared volumes
+### Volumes
 
-Register a volume on the server (`disk0` → `/mnt/data`), then:
+Register a volume on the server, then name it. A repository writes the same
+thing either way — which directory that resolves to is the server's choice:
 
 ```yaml
 volumes:
   - disk0                    # mounts at /shared/disk0
 
-  - name: uploads
-    mountPath: /var/uploads
-    readOnly: false
+  - name: media
+    mountPath: /var/media
+    readOnly: true
 
   - name: disk0
-    subPath: cache           # a subdirectory of this project's own area
+    subPath: cache           # a subdirectory of what this project gets
 ```
 
-A project with ID `abcd1234` mounting `disk0` gets `/mnt/data/abcd1234` at
-`/shared/disk0`. The project ID never changes, even if you rename the
-project, so renaming can never orphan or expose its data.
+| Kind | A project mounting it gets | For |
+| --- | --- | --- |
+| **Project volume** | `<path>/<project-id>` | its own uploads, cache, database |
+| **Shared volume** | `<path>` itself | a dataset or media library several projects share |
+
+A project volume is named after the project ID, which never changes even if
+you rename the project, so renaming can never orphan or expose its data. A
+shared volume has no isolation at all — that is what it is for, and why it
+is never the default.
 
 ### Release
 

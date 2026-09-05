@@ -141,7 +141,7 @@ ssh -L 4321:127.0.0.1:4321 you@your-server
 
 ---
 
-## Shared volumes: the one rule
+## Volumes: the one rule
 
 publix runs in a container but creates containers on the **host**. It hands
 paths to the Docker daemon, and the daemon resolves them on the host — so a
@@ -170,12 +170,22 @@ cd /opt/publix
 docker compose -f deploy/docker-compose.yml up -d
 ```
 
-Now register it in **Settings → Shared volumes** with name `disk0` and path
-`/mnt/data`. A project asking for `disk0` gets `/mnt/data/<project-id>`
-mounted at `/shared/disk0`, and cannot see any other project's directory.
+Now register it in **Settings → Volumes**. There are two kinds, and the
+choice decides what a project actually gets:
 
-Skip the compose mount and the volume will appear to register fine, then
-every project using it will bind an empty directory. Mount it.
+| Kind | A project mounting `disk0` gets | For |
+| --- | --- | --- |
+| **Project volume** | `/mnt/data/<project-id>` | its own uploads, cache, database |
+| **Shared volume** | `/mnt/data` itself | a dataset or media library several projects share |
+
+A project volume is isolated: two projects can both mount it and neither can
+read the other's files. A shared volume is deliberately not — every project
+mounting it reads and writes the same files, and any of them can overwrite
+what another wrote. Mark it read-only if the projects using it only need to
+read.
+
+Skip the compose mount above and the volume will appear to register fine,
+then every project using it will bind an empty directory. Mount it.
 
 ---
 

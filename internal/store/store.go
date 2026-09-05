@@ -102,6 +102,25 @@ func (s *Store) normalise() {
 	if set.GitHub.WebhookSecret == "" {
 		set.GitHub.WebhookSecret = NewToken()
 	}
+
+	// Volumes gained a scope. Everything registered before that was
+	// per-project, so migrate rather than silently changing what an
+	// existing install's projects mount.
+	if len(set.LegacySharedVolumes) > 0 {
+		for _, v := range set.LegacySharedVolumes {
+			if _, exists := set.Volume(v.Name); exists {
+				continue
+			}
+			v.Scope = ScopeProject
+			set.Volumes = append(set.Volumes, v)
+		}
+		set.LegacySharedVolumes = nil
+	}
+	for i := range set.Volumes {
+		if set.Volumes[i].Scope == "" {
+			set.Volumes[i].Scope = ScopeProject
+		}
+	}
 	for _, p := range s.data.Projects {
 		if p.Slug == "" {
 			p.Slug = Slugify(p.Name)
@@ -153,7 +172,7 @@ func (s *Store) Settings() Settings {
 	defer s.mu.RUnlock()
 	c := s.data.Settings
 	c.EntryPoints = append([]string(nil), c.EntryPoints...)
-	c.SharedVolumes = append([]SharedVolume(nil), c.SharedVolumes...)
+	c.Volumes = append([]Volume(nil), c.Volumes...)
 	return c
 }
 
