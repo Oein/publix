@@ -207,3 +207,36 @@ func TestProjectLookupByIDAndSlug(t *testing.T) {
 		t.Error("an unknown key resolved to a project")
 	}
 }
+
+// A fresh store must already satisfy every invariant, not acquire them the
+// first time something happens to write settings. A missing webhook secret
+// means incoming webhooks are refused and the settings page offers the
+// operator a blank field to paste into GitHub.
+func TestFreshStoreIsNormalised(t *testing.T) {
+	s := open(t)
+	set := s.Settings()
+
+	if set.GitHub.WebhookSecret == "" {
+		t.Error("a fresh store has no webhook secret")
+	}
+	if set.Auth.SessionKey == "" {
+		t.Error("a fresh store has no session signing key")
+	}
+	if set.Network == "" || set.WorkDir == "" || set.KeepImages < 1 {
+		t.Errorf("defaults missing on a fresh store: %+v", set)
+	}
+
+	// And they must survive a reopen rather than being regenerated, or
+	// every restart would invalidate sessions and break existing webhooks.
+	again, err := OpenAt(s.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened := again.Settings()
+	if reopened.GitHub.WebhookSecret != set.GitHub.WebhookSecret {
+		t.Error("the webhook secret changed across a reopen; existing GitHub webhooks would break")
+	}
+	if reopened.Auth.SessionKey != set.Auth.SessionKey {
+		t.Error("the session key changed across a reopen; everyone would be signed out")
+	}
+}

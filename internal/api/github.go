@@ -24,6 +24,11 @@ func (s *Server) handleGitHubStatus(w http.ResponseWriter, r *http.Request) {
 		"apiBase":      firstNonEmpty(set.GitHub.APIBase, github.DefaultAPIBase),
 		"webhookUrl":   s.webhookURL(r),
 		"publicUrlSet": set.PublicURL != "",
+		// The secret is shown deliberately. A GitHub App's webhook is
+		// configured on the App, not on each repository, so the operator
+		// has to paste this into GitHub by hand — and cannot if publix
+		// keeps it to itself. This endpoint already requires a session.
+		"webhookSecret": set.GitHub.WebhookSecret,
 	}
 	if !set.GitHub.Configured() {
 		writeJSON(w, http.StatusOK, out)
@@ -45,7 +50,30 @@ func (s *Server) handleGitHubStatus(w http.ResponseWriter, r *http.Request) {
 		out["avatar"] = viewer.AvatarURL
 		out["type"] = viewer.Type
 	}
+
+	// In App mode, report where the App itself sends webhooks. If that
+	// already points here, publix must not also create per-repository
+	// hooks, or every push would arrive twice.
+	if app, isApp, err := gh.App(ctx); isApp && err == nil {
+		out["appName"] = app.Name
+		out["appUrl"] = app.HTMLURL
+		out["appWebhookUrl"] = app.HookAttributes.URL
+		out["appWebhookActive"] = app.HookAttributes.Active
+		out["appDeliversWebhooks"] = appDeliversWebhooks(app, s.webhookURL(r))
+	} else if isApp && err != nil {
+		out["appError"] = err.Error()
+	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// appDeliversWebhooks reports whether the App's own webhook already reaches
+// this publix, which is what decides between App-level and per-repository
+// delivery.
+func appDeliversWebhooks(app *github.AppInfo, want string) bool {
+	if app == nil || !app.HookAttributes.Active {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSuffix(app.HookAttributes.URL, "/"), strings.TrimSuffix(want, "/"))
 }
 
 func githubMode(g store.GitHubSettings) string {
@@ -83,6 +111,9 @@ func (s *Server) handleSetGitHub(w http.ResponseWriter, r *http.Request) {
 		InstallationID string `json:"installationId"`
 		PrivateKey     string `json:"privateKey"`
 		APIBase        string `json:"apiBase"`
+		// WebhookSecret lets an operator match a secret their App already
+		// uses, rather than having to change it on GitHub's side.
+		WebhookSecret string `json:"webhookSecret"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -96,7 +127,7 @@ func (s *Server) handleSetGitHub(w http.ResponseWriter, r *http.Request) {
 		InstallationID: strings.TrimSpace(body.InstallationID),
 		PrivateKey:     strings.TrimSpace(body.PrivateKey),
 		APIBase:        strings.TrimSpace(body.APIBase),
-		WebhookSecret:  current.WebhookSecret,
+		WebhookSecret:  firstNonEmpty(strings.TrimSpace(body.WebhookSecret), current.WebhookSecret),
 	}
 	// The dashboard never receives the stored token or key back, so an
 	// empty field on save means "leave it alone", not "clear it".
@@ -150,6 +181,20 @@ func (s *Server) handleDisconnectGitHub(w http.ResponseWriter, r *http.Request) 
 	s.gh, s.ghFingerp = nil, ""
 	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// appDelivers reports whether the configured GitHub App already sends this
+// publix its webhooks, in which case per-repository hooks are redundant.
+//
+// It fails closed: if the App cannot be read, publix creates the repository
+// hook. A duplicate delivery is noisy; no delivery at all means pushes
+// silently stop deploying, which is worse.
+func (s *Server) appDelivers(ctx context.Context, gh *github.Client, r *http.Request) bool {
+	app, isApp, err := gh.App(ctx)
+	if !isApp || err != nil {
+		return false
+	}
+	return appDeliversWebhooks(app, s.webhookURL(r))
 }
 
 // repoView is a repository row on the import screen, annotated with whether
@@ -365,9 +410,20 @@ func (s *Server) handleImportRepo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	set := s.store.Settings()
-	if set.PublicURL == "" {
-		warnings = append(warnings, "No public URL is configured, so a webhook could not be registered. Set it under Settings, then re-import or add the webhook by hand to enable deploy-on-push.")
-	} else if created.AutoDeploy {
+	switch {
+	case !created.AutoDeploy:
+		// Nothing to register: the project does not want deploy-on-push.
+
+	case set.PublicURL == "":
+		warnings = append(warnings, "No public URL is configured, so a webhook could not be registered. Set it under Settings → Server, then re-import or add the webhook by hand to enable deploy-on-push.")
+
+	case s.appDelivers(ctx, gh, r):
+		// A GitHub App already receives a push event for every repository
+		// it is installed on. Adding a repository webhook as well would
+		// have GitHub deliver each push twice, which queues two
+		// deployments for one commit.
+
+	default:
 		hookID, err := gh.EnsureHook(ctx, repo.Owner, repo.Name, s.webhookURL(r), set.GitHub.WebhookSecret)
 		if err != nil {
 			warnings = append(warnings, "could not create the GitHub webhook (deploy-on-push is off): "+err.Error())

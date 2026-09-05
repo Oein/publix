@@ -49,15 +49,18 @@ func OpenAt(path string) (*Store, error) {
 
 	raw, err := os.ReadFile(path)
 	switch {
-	case os.IsNotExist(err):
+	case os.IsNotExist(err), err == nil && len(raw) == 0:
+		// A brand-new store still has to satisfy the invariants normalise
+		// establishes — notably a webhook secret, without which incoming
+		// webhooks are rejected and the settings page shows a blank field
+		// the operator is meant to paste into GitHub.
+		s.normalise()
 		if err := s.persist(); err != nil {
 			return nil, err
 		}
 		return s, nil
 	case err != nil:
 		return nil, err
-	case len(raw) == 0:
-		return s, nil
 	}
 
 	if err := json.Unmarshal(raw, &s.data); err != nil {

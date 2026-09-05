@@ -93,6 +93,45 @@ Then **Settings → GitHub** and connect either a personal access token
 (fastest) or a GitHub App (right for an organisation). Your repositories
 appear under **Import**.
 
+### Connecting a GitHub App
+
+publix has no OAuth login, so **the Callback URL is not used** — leave
+“Request user authorization (OAuth) during installation” unchecked. The
+only address GitHub needs is the webhook.
+
+| Field | Value |
+| --- | --- |
+| Homepage URL | `https://publix.example.com` — required by GitHub, unused by publix |
+| Callback URL | leave empty |
+| Webhook URL | `https://publix.example.com/api/webhooks/github` |
+| Webhook secret | the one shown under Settings → GitHub |
+| Subscribe to events | **Push**, and nothing else |
+
+Repository permissions:
+
+| Permission | Level | Why |
+| --- | --- | --- |
+| Contents | Read-only | to clone. Read **and write** only if you want publix to commit a `deployment.yaml` for you when importing |
+| Metadata | Read-only | mandatory; GitHub selects it for you |
+| Commit statuses | Read and write | to report the deploy result next to the commit |
+| Webhooks | Read and write | only if the App has no webhook of its own |
+
+Then **Install** the App on the account or organisation whose repositories
+you want to deploy, and paste the App ID and the private key into
+Settings → GitHub. publix finds the installation itself when there is only
+one.
+
+Both the webhook URL and its secret are shown on that page, with a copy
+button, precisely because an App's webhook is configured on the App rather
+than on each repository.
+
+> **One webhook, not two.** If the App has its own webhook pointing here,
+> publix will *not* also add one to each repository — GitHub would then
+> deliver every push twice. The settings page says which of the two is in
+> effect. Leaving the App's webhook empty is equally fine; publix then
+> creates a repository hook as you import, which is what a personal access
+> token always does.
+
 If you did not pass `--dashboard`, reach it over an SSH tunnel instead:
 
 ```bash

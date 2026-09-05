@@ -18,6 +18,7 @@
   let apiBase = $state('');
   let saving = $state(false);
   let disconnecting = $state(false);
+  let showSecret = $state(false);
 
   async function load() {
     try {
@@ -72,9 +73,9 @@
     }
   }
 
-  function copyWebhook() {
-    navigator.clipboard?.writeText(status.webhookUrl);
-    notify.info('Webhook URL copied');
+  function copy(value, what) {
+    navigator.clipboard?.writeText(value);
+    notify.info(`${what} copied`);
   }
 </script>
 
@@ -187,22 +188,90 @@
 
 <Card title="Webhook" description="Where GitHub sends push events.">
   {#if status}
-    <div class="hook">
-      <code class="grow truncate">{status.webhookUrl}</code>
-      <Button size="sm" onclick={copyWebhook}>Copy</Button>
+    <div class="field">
+      <label for="hookurl">Payload URL</label>
+      <div class="hook">
+        <code id="hookurl" class="grow truncate">{status.webhookUrl}</code>
+        <Button size="sm" onclick={() => copy(status.webhookUrl, 'URL')}>Copy</Button>
+      </div>
     </div>
+
+    <div class="field">
+      <label for="hooksecret">Secret</label>
+      <div class="hook">
+        <code id="hooksecret" class="grow truncate">
+          {showSecret ? status.webhookSecret : '•'.repeat(48)}
+        </code>
+        <Button size="sm" variant="ghost" onclick={() => (showSecret = !showSecret)}>
+          {showSecret ? 'Hide' : 'Reveal'}
+        </Button>
+        <Button size="sm" onclick={() => copy(status.webhookSecret, 'Secret')}>Copy</Button>
+      </div>
+    </div>
+
     {#if !status.publicUrlSet}
       <p class="warn small">
         No public URL is set, so this address was guessed from your browser. Set it under
         Settings → Server before importing, or webhooks cannot be registered.
       </p>
+    {/if}
+
+    {#if status.mode === 'app'}
+      <div class="note" class:ok={status.appDeliversWebhooks}>
+        {#if status.appDeliversWebhooks}
+          <strong class="small">Your GitHub App delivers these webhooks.</strong>
+          <p class="small muted">
+            publix will not add a webhook to each repository, because the App already sends a
+            push event for every repository it is installed on. Adding both would deliver each
+            push twice.
+          </p>
+        {:else}
+          <strong class="small">Set this URL and secret on your GitHub App</strong>
+          <p class="small muted">
+            Under the App's settings → Webhook. Its <em>Callback URL</em> is not used —
+            publix has no OAuth login, so leave “Request user authorization (OAuth) during
+            installation” unchecked.
+          </p>
+          {#if status.appWebhookUrl}
+            <p class="small muted">
+              The App currently posts to <code>{status.appWebhookUrl}</code>{status.appWebhookActive
+                ? ''
+                : ' (inactive)'}.
+            </p>
+          {:else}
+            <p class="small muted">
+              The App has no webhook configured. publix will fall back to creating one on each
+              repository as you import it, which also works — it just needs the
+              <em>Webhooks</em> repository permission.
+            </p>
+          {/if}
+        {/if}
+      </div>
     {:else}
       <p class="muted small">
-        publix registers this automatically when you import a repository with “Deploy on every
-        push” enabled. Its signature is verified on every request, so an unsigned call is refused.
+        publix registers this on each repository as you import it, with “Deploy on every push”
+        enabled. Its signature is verified on every request, so an unsigned call is refused.
       </p>
     {/if}
   {/if}
+</Card>
+
+<Card title="Setting up a GitHub App" description="What to put in each field.">
+  <dl>
+    <div><dt>Homepage URL</dt><dd><code>{status?.webhookUrl?.replace('/api/webhooks/github', '') ?? 'https://publix.example.com'}</code> <span class="muted">— required by GitHub, unused by publix</span></dd></div>
+    <div><dt>Callback URL</dt><dd><span class="muted">leave empty; publix has no OAuth login</span></dd></div>
+    <div><dt>Webhook URL</dt><dd><code>{status?.webhookUrl ?? ''}</code></dd></div>
+    <div><dt>Webhook secret</dt><dd><span class="muted">the secret above</span></dd></div>
+    <div><dt>Subscribe to</dt><dd><code>Push</code> <span class="muted">— nothing else is read</span></dd></div>
+  </dl>
+
+  <p class="small muted heading">Repository permissions</p>
+  <dl>
+    <div><dt>Contents</dt><dd>Read-only <span class="muted">— to clone. Read and write only if you want publix to commit a deployment.yaml for you on import.</span></dd></div>
+    <div><dt>Metadata</dt><dd>Read-only <span class="muted">— mandatory; GitHub selects it for you</span></dd></div>
+    <div><dt>Commit statuses</dt><dd>Read and write <span class="muted">— to report deploy results on the commit</span></dd></div>
+    <div><dt>Webhooks</dt><dd>Read and write <span class="muted">— only if the App has no webhook of its own</span></dd></div>
+  </dl>
 </Card>
 
 {#if disconnecting}
@@ -255,6 +324,14 @@
 
   .form { display: flex; flex-direction: column; gap: 14px; }
 
+  .field { margin-bottom: 12px; }
+  .field label {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 12.5px;
+    font-weight: 550;
+  }
+
   .hook {
     display: flex;
     align-items: center;
@@ -262,9 +339,31 @@
     padding: 8px 10px;
     background: var(--bg-sunken);
     border-radius: var(--radius-sm);
-    margin-bottom: 8px;
   }
   .hook code { font-family: var(--mono); font-size: 12px; }
+
+  .note {
+    margin-top: 12px;
+    padding: 10px 12px;
+    background: var(--warn-bg);
+    border-left: 3px solid var(--warn);
+    border-radius: var(--radius-sm);
+  }
+  .note.ok { background: var(--good-bg); border-left-color: var(--good); }
+  .note p { margin: 4px 0 0; line-height: 1.5; }
+
+  dl { margin: 0; display: flex; flex-direction: column; gap: 7px; }
+  dl div { display: flex; gap: 12px; font-size: 12.5px; align-items: baseline; }
+  dt { min-width: 130px; flex: none; color: var(--text-muted); }
+  dd { margin: 0; }
+  dd code {
+    padding: 1px 5px;
+    background: var(--bg-sunken);
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+  }
+  .heading { margin: 16px 0 8px; font-weight: 600; color: var(--text); }
 
   .warn {
     padding: 8px 10px;
