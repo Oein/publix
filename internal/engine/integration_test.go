@@ -477,11 +477,12 @@ func TestUnregisteredVolumeFailsClearly(t *testing.T) {
 	}
 }
 
-// A static site should build on the host and be packaged into an image.
+// A static site with nothing to build is copied straight into an image.
 func TestDeployStaticSite(t *testing.T) {
 	h := newHarness(t)
 	p := h.project("site", map[string]string{
-		"deployment.yaml": "type: static\nbuild:\n  command: \"mkdir -p dist && echo hello-static > dist/index.html\"\n  output: dist\n",
+		"deployment.yaml":   "type: static\nbuild:\n  output: public\n",
+		"public/index.html": "hello-static",
 	})
 	dep := h.deploy(p, Options{Trigger: "test"})
 	h.mustSucceed(dep)
@@ -489,6 +490,43 @@ func TestDeployStaticSite(t *testing.T) {
 	ctx := context.Background()
 	if body := httpGet(t, h, h.oneContainer(ctx, p.ID), 80, "/"); !strings.Contains(body, "hello-static") {
 		t.Errorf("static site served %q", body)
+	}
+}
+
+// A static build with a toolchain publix does not recognise runs in the
+// image the project names. Silently skipping the build command here would
+// ship an empty site, which is the worst possible outcome.
+func TestDeployStaticWithExplicitBuilder(t *testing.T) {
+	h := newHarness(t)
+	p := h.project("generated", map[string]string{
+		"deployment.yaml": "type: static\nbuild:\n" +
+			"  builder: alpine:3.21\n" +
+			"  command: \"mkdir -p out && echo built-in-docker > out/index.html\"\n" +
+			"  output: out\n",
+		"source.txt": "input",
+	})
+	dep := h.deploy(p, Options{Trigger: "test"})
+	h.mustSucceed(dep)
+
+	ctx := context.Background()
+	if body := httpGet(t, h, h.oneContainer(ctx, p.ID), 80, "/"); !strings.Contains(body, "built-in-docker") {
+		t.Errorf("static site served %q, want the build command's output", body)
+	}
+}
+
+// Without a builder image publix cannot know what runs the command, and
+// must say so rather than quietly producing an empty site.
+func TestStaticBuildWithoutBuilderIsRefused(t *testing.T) {
+	h := newHarness(t)
+	p := h.project("nobuilder", map[string]string{
+		"deployment.yaml": "type: static\nbuild:\n  command: make site\n  output: out\n",
+	})
+	dep := h.deploy(p, Options{Trigger: "test"})
+	if dep.Status != store.StatusFailed {
+		t.Fatalf("deploy ended %s, want failed", dep.Status)
+	}
+	if !strings.Contains(dep.Error, "build.builder") {
+		t.Errorf("the error should name the setting that fixes it:\n%s", dep.Error)
 	}
 }
 

@@ -5,6 +5,7 @@
   import Badge from '../lib/Badge.svelte';
   import Button from '../lib/Button.svelte';
   import Empty from '../lib/Empty.svelte';
+  import FrameworkIcon from '../lib/FrameworkIcon.svelte';
 
   let { revision } = $props();
 
@@ -73,7 +74,10 @@
     {#each projects as project (project.id)}
       <a class="card" href="#/projects/{project.slug}">
         <div class="spread">
-          <h2 class="truncate">{project.name}</h2>
+          <div class="row grow" style="min-width:0">
+            <FrameworkIcon framework={project.framework} title={project.frameworkName} />
+            <h2 class="truncate">{project.name}</h2>
+          </div>
           {#if project.building}
             <Badge tone="busy" dot>Building</Badge>
           {:else if project.live}
@@ -105,8 +109,8 @@
           {:else}
             <span class="faint">No repository</span>
           {/if}
-          {#if project.kind}
-            <span class="sep">·</span><span class="nowrap">{project.kind}</span>
+          {#if project.frameworkName}
+            <span class="sep">·</span><span class="nowrap">{project.frameworkName}</span>
           {/if}
         </div>
 

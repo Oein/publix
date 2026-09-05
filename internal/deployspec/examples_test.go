@@ -48,6 +48,7 @@ func TestFullReferenceCoversEveryField(t *testing.T) {
 		"routes:", "volumes:", "build:", "health:", "resources:", "release:",
 		"cron:",
 		"target:", "pull:", "args:", "install:", "output:", "spa:", "runtime:",
+		"framework:", "start:", "builder:",
 		"cpu:", "memory:", "memoryReservation:", "pidsLimit:",
 		"strategy:", "drain:", "autoRollback:", "branch:",
 		"interval:", "timeout:", "grace:", "status:",

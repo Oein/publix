@@ -21,6 +21,11 @@ const (
 	KindDockerfile Kind = "dockerfile"
 	// KindCompose hands the whole stack to docker compose.
 	KindCompose Kind = "compose"
+	// KindFramework lets publix generate the Dockerfile from the
+	// repository's own framework configuration. This is the default for a
+	// Next.js, Nuxt, SvelteKit, Remix, Go or Python project that has not
+	// written a Dockerfile — which is most of them.
+	KindFramework Kind = "framework"
 	// KindStatic runs a build command and serves the output directory.
 	KindStatic Kind = "static"
 	// KindImage deploys a prebuilt image without building anything.
@@ -42,6 +47,11 @@ type Spec struct {
 	// Compose is the path to the compose file. When Kind is auto and a
 	// compose file exists at a conventional name, it is found without this.
 	Compose string `yaml:"compose,omitempty"`
+
+	// Framework pins which framework template to use, e.g. "nextjs". It is
+	// detected from the repository's config files when omitted, so this is
+	// only needed to override a wrong guess.
+	Framework string `yaml:"framework,omitempty"`
 
 	// Service names the compose service that receives the project's
 	// domains. Required only when the compose file has more than one
@@ -160,15 +170,23 @@ type Build struct {
 	// Pull refreshes base images on every build.
 	Pull bool `yaml:"pull,omitempty"`
 
-	// Command is the build command for type: static, e.g. "npm run build".
+	// Command is the build command, e.g. "npm run build". Detected from
+	// the repository when omitted.
 	Command string `yaml:"command,omitempty"`
-	// Install runs before Command, e.g. "npm ci".
+	// Install runs before Command, e.g. "npm ci". Detected from the
+	// repository's lockfile when omitted.
 	Install string `yaml:"install,omitempty"`
+	// Start is the command the container runs. Detected when omitted;
+	// setting it also forces the project to be treated as a server.
+	Start string `yaml:"start,omitempty"`
 	// Output is the directory a static build emits.
 	Output string `yaml:"output,omitempty"`
 	// SPA rewrites unknown paths to index.html.
-	SPA bool `yaml:"spa,omitempty"`
-	// Runtime is the base image serving a static build.
+	SPA *bool `yaml:"spa,omitempty"`
+	// Builder is the image the build runs in, e.g. "node:20-alpine".
+	// Override it to pin a toolchain version or add system packages.
+	Builder string `yaml:"builder,omitempty"`
+	// Runtime is the image the application runs in.
 	Runtime string `yaml:"runtime,omitempty"`
 }
 

@@ -1,0 +1,29 @@
+# A framework app with no Dockerfile.
+#
+# This is the whole file. publix reads next.config.js, works out that this
+# is Next.js, picks the package manager from the lockfile, and generates a
+# multi-stage Dockerfile — which it never writes to your repository.
+#
+# Commit your own Dockerfile at any time and publix defers to it entirely.
+
+name: storefront
+domains:
+  - shop.example.com
+
+env:
+  DATABASE_URL: ${secret.DATABASE_URL}
+
+---
+# Everything below is optional. It is what you would write to override a
+# detail publix got wrong, and none of it is needed for the file above.
+#
+# type: framework          # detected; also: dockerfile, compose, static, image
+# framework: nextjs        # detected from next.config.js
+# port: 3000               # detected from the framework's default
+#
+# build:
+#   install: pnpm install --frozen-lockfile   # detected from the lockfile
+#   command: pnpm build                       # detected from package.json
+#   start: node server.js                     # detected from the framework
+#   builder: node:20-alpine                   # detected from engines.node
+#   runtime: node:20-alpine

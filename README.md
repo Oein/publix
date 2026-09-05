@@ -20,10 +20,17 @@ Then open the dashboard, set a password, connect GitHub, and press Import.
 
 ## What it does
 
+**Most repositories need no Dockerfile at all.** publix reads the config
+files a project already has — `next.config.js`, `svelte.config.js`,
+`astro.config.mjs`, `nuxt.config.ts`, `go.mod`, `requirements.txt` — works
+out what it is and how it is meant to run, and generates a multi-stage
+Dockerfile for it. That file is built and thrown away; your repository is
+never modified. Commit your own Dockerfile whenever you want and publix
+defers to it entirely.
+
 **One file describes a deployment.** `deployment.yaml` at the root of a
-repository says how to build and run it. Most repositories need three lines,
-because everything publix can work out for itself, it does — Dockerfile,
-Compose file, static build, framework conventions, exposed port.
+repository says anything the repository cannot say for itself. Most
+repositories need three lines; many need none.
 
 **Traffic moves atomically.** A new deployment is built, started and
 health-checked on its own private URL before anything reaches it. Only then
@@ -145,6 +152,43 @@ health:
 `type` is detected when omitted. A Compose file wins over a Dockerfile, which
 wins over a framework guess — a repository that ships either has already
 said how it wants to run.
+
+```yaml
+type: framework         # publix generates the Dockerfile
+framework: nextjs       # detected from next.config.js
+port: 3000              # detected from the framework
+```
+
+Supported without a Dockerfile: **Next.js** (including `output: 'standalone'`,
+which yields a runtime image an order of magnitude smaller), **Nuxt**,
+**SvelteKit**, **Remix**, **Astro**, **NestJS**, **Gatsby**, **Docusaurus**,
+**Angular**, **Create React App**, **Vite**, plain **Node.js**, **Go**,
+**Django**, **FastAPI** and **Flask**.
+
+What is read from the config file matters, because it decides the shape of
+the deployment:
+
+| File | What it decides |
+| --- | --- |
+| `next.config.*` | `output: 'standalone'` → small runtime image; `output: 'export'` → static site |
+| `svelte.config.*` | `adapter-static` → static site; `adapter-node` → server |
+| `astro.config.*` | `output: 'server'` → server; otherwise static |
+| `nuxt.config.*` | `ssr: false` → pre-rendered static site |
+| `angular.json` | the build output directory |
+| `vite.config.*` | a custom `outDir` |
+| the lockfile | npm, pnpm, yarn or bun — installing with the wrong one gives a different dependency tree than the author tested |
+| `engines.node`, `.nvmrc` | which Node version to build on |
+| `go.mod` | which Go version, and where the main package is |
+
+Anything detected can be overridden:
+
+```yaml
+build:
+  install: pnpm install --frozen-lockfile
+  command: pnpm build
+  start: node dist/server.js
+  builder: node:20-alpine
+```
 
 ```yaml
 type: dockerfile        # dockerfile | compose | static | image | auto
@@ -384,6 +428,10 @@ A failure in steps 1–4 leaves the live deployment untouched.
 
 **Image tags are keyed by commit**, so a redeploy or a rollback of a commit
 already built resolves to an image that exists and skips the build entirely.
+
+**Generated Dockerfiles are printed into the build log.** They exist nowhere
+else, so that is the only place to see what was actually built — and the
+first thing you need when a generated build goes wrong.
 
 ---
 

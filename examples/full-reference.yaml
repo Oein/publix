@@ -9,7 +9,11 @@ name: my-app                  # defaults to the repository name
 
 # --- build ----------------------------------------------------------------
 
-type: auto                    # auto | dockerfile | compose | static | image
+# auto detects the rest. `framework` means publix generates the Dockerfile
+# from the repository's own framework configuration — which is what happens
+# for a Next.js, Nuxt, SvelteKit, Remix, Go or Python project that has not
+# written one.
+type: auto                    # auto | dockerfile | compose | framework | static | image
 context: .                    # build context, relative to the repo root
 
 dockerfile: Dockerfile        # type: dockerfile
@@ -17,18 +21,28 @@ compose: docker-compose.yml   # type: compose
 service: web                  # type: compose — which service is exposed
 image: ghcr.io/acme/app:1.0   # type: image
 
+# Which template to use. Detected from next.config.js, svelte.config.js,
+# astro.config.mjs, nuxt.config.ts, go.mod, requirements.txt and so on, so
+# this is only needed to correct a wrong guess.
+framework: nextjs             # nextjs | nuxt | sveltekit | remix | astro |
+                              # nestjs | gatsby | docusaurus | angular |
+                              # cra | vite | node | go | django | fastapi | flask
+
 build:
   target: ""                  # a stage of a multi-stage Dockerfile
   pull: false                 # refresh base images every build
   args:                       # --build-arg values; NOT available at runtime
     VERSION: "1.0"
 
-  # type: static only
-  install: npm ci
-  command: npm run build
-  output: dist
+  # Every field below is detected from the repository. Set one only to
+  # override what publix worked out.
+  install: npm ci             # from the lockfile
+  command: npm run build      # from package.json, or the framework default
+  start: npm run start        # the command the container runs
+  output: dist                # where a static build writes
   spa: false                  # rewrite unknown paths to index.html
-  runtime: nginx:1.27-alpine  # base image that serves the output
+  builder: node:22-alpine     # image the build runs in
+  runtime: nginx:1.27-alpine  # image the app runs in
 
 # --- runtime --------------------------------------------------------------
 

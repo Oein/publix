@@ -5,6 +5,7 @@
   import Button from '../lib/Button.svelte';
   import Field from '../lib/Field.svelte';
   import Badge from '../lib/Badge.svelte';
+  import FrameworkIcon from '../lib/FrameworkIcon.svelte';
 
   /**
    * The import dialog.
@@ -92,11 +93,26 @@
   {:else}
     <div class="detected">
       <div class="row">
-        <Badge tone="good">{inspection.detection.framework || inspection.detection.kind}</Badge>
-        {#if inspection.hasSpec}
-          <span class="small muted">Using the repository's own <code>deployment.yaml</code></span>
-        {:else}
-          <span class="small muted">Detected automatically — no deployment.yaml in this repo</span>
+        <FrameworkIcon
+          framework={inspection.detection.framework || inspection.detection.kind}
+          title={inspection.detection.name}
+          size={22}
+        />
+        <div class="col" style="gap:1px">
+          <strong class="small">{inspection.detection.name || inspection.detection.kind}</strong>
+          {#if inspection.hasSpec}
+            <span class="small muted">Using the repository's own <code>{inspection.specPath}</code></span>
+          {:else if inspection.detection.generated}
+            <span class="small muted">
+              No Dockerfile needed — publix builds this with a generated one
+            </span>
+          {:else}
+            <span class="small muted">Detected automatically</span>
+          {/if}
+        </div>
+        {#if inspection.detection.configFile}
+          <span class="grow"></span>
+          <Badge tone="muted">{inspection.detection.configFile}</Badge>
         {/if}
       </div>
 
@@ -108,8 +124,17 @@
         {#if inspection.detection.dockerfile}
           <div><dt>Dockerfile</dt><dd><code>{inspection.detection.dockerfile}</code></dd></div>
         {/if}
+        {#if inspection.detection.install}
+          <div><dt>Install</dt><dd><code>{inspection.detection.install}</code></dd></div>
+        {/if}
         {#if inspection.detection.command}
-          <div><dt>Build command</dt><dd><code>{inspection.detection.command}</code></dd></div>
+          <div><dt>Build</dt><dd><code>{inspection.detection.command}</code></dd></div>
+        {/if}
+        {#if inspection.detection.start}
+          <div><dt>Start</dt><dd><code>{inspection.detection.start}</code></dd></div>
+        {/if}
+        {#if inspection.detection.standalone}
+          <div><dt>Output</dt><dd>standalone (small runtime image)</dd></div>
         {/if}
         {#if inspection.detection.output}
           <div><dt>Output</dt><dd><code>{inspection.detection.output}</code></dd></div>

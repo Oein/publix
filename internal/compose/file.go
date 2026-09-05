@@ -41,20 +41,27 @@ type Service struct {
 	Command     any      `yaml:"command,omitempty"`
 }
 
-// Parse reads a compose file. Unknown fields are tolerated: publix must not
-// refuse to deploy a stack just because Compose grew a feature it has not
-// heard of.
+// Parse reads a compose file from disk.
 func Parse(path string) (*File, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
+	return ParseBytes(raw, path)
+}
+
+// ParseBytes decodes a compose file whose contents are already in hand,
+// which is how a repository on GitHub is inspected without cloning it.
+//
+// Unknown fields are tolerated: publix must not refuse to deploy a stack
+// just because Compose grew a feature it has not heard of.
+func ParseBytes(raw []byte, name string) (*File, error) {
 	var f File
 	if err := yaml.Unmarshal(raw, &f); err != nil {
-		return nil, fmt.Errorf("%s is not a valid compose file: %w", path, err)
+		return nil, fmt.Errorf("%s is not a valid compose file: %w", name, err)
 	}
 	if len(f.Services) == 0 {
-		return nil, fmt.Errorf("%s declares no services", path)
+		return nil, fmt.Errorf("%s declares no services", name)
 	}
 	return &f, nil
 }

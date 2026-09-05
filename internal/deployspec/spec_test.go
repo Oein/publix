@@ -114,7 +114,7 @@ func TestStaticDetectionFromVite(t *testing.T) {
 	if r.Build.Install != "npm ci" {
 		t.Errorf("install = %q, want npm ci from the lockfile", r.Build.Install)
 	}
-	if !r.Build.SPA {
+	if !Bool(r.Build.SPA, false) {
 		t.Error("SPA fallback should be on for a Vite app")
 	}
 	if r.Port != 80 {
@@ -253,5 +253,111 @@ func TestEmptySpecIsValidForADockerfileRepo(t *testing.T) {
 	r := resolve(t, "", map[string]string{"Dockerfile": "FROM nginx\nEXPOSE 80\n"})
 	if r.Kind != KindDockerfile || r.Port != 80 {
 		t.Errorf("an empty deployment.yaml should still resolve: kind=%q port=%d", r.Kind, r.Port)
+	}
+}
+
+// The headline behaviour of the framework templates: a repository with a
+// Next.js config and no Dockerfile resolves to something deployable, with
+// an empty deployment.yaml.
+func TestFrameworkKindNeedsNoDockerfile(t *testing.T) {
+	r := resolve(t, "", map[string]string{
+		"package.json":      `{"scripts":{"build":"next build","start":"next start"},"dependencies":{"next":"14"}}`,
+		"package-lock.json": "{}",
+		"next.config.js":    "module.exports = {}",
+	})
+
+	if r.Kind != KindFramework {
+		t.Fatalf("kind = %q, want framework", r.Kind)
+	}
+	if r.Framework != "nextjs" {
+		t.Errorf("framework = %q, want nextjs", r.Framework)
+	}
+	if r.Port != 3000 {
+		t.Errorf("port = %d, want 3000", r.Port)
+	}
+	if r.Build.Start == "" || r.Build.Command == "" || r.Build.Install == "" {
+		t.Errorf("build commands should be filled in from detection: %+v", r.Build)
+	}
+	if !r.Detection.Generated {
+		t.Error("detection should report that publix generates the Dockerfile")
+	}
+	if r.Detection.ConfigFile != "next.config.js" {
+		t.Errorf("configFile = %q", r.Detection.ConfigFile)
+	}
+}
+
+// A repository's own Dockerfile still wins over any framework template.
+func TestOwnDockerfileBeatsFrameworkTemplate(t *testing.T) {
+	r := resolve(t, "", map[string]string{
+		"package.json": `{"dependencies":{"next":"14"}}`,
+		"Dockerfile":   "FROM node:22-alpine\nEXPOSE 3000\n",
+	})
+	if r.Kind != KindDockerfile {
+		t.Errorf("kind = %q, want dockerfile", r.Kind)
+	}
+	if r.Detection.Generated {
+		t.Error("publix should not generate a Dockerfile when the repo has one")
+	}
+}
+
+// deployment.yaml must be able to override anything detection inferred.
+func TestSpecOverridesDetection(t *testing.T) {
+	r := resolve(t, `
+type: framework
+port: 4000
+build:
+  install: pnpm install
+  command: pnpm build
+  start: node dist/main.js
+  builder: node:20-alpine
+`, map[string]string{
+		"package.json":   `{"dependencies":{"next":"14"},"scripts":{"build":"next build","start":"next start"}}`,
+		"next.config.js": "module.exports = {}",
+	})
+
+	if r.Port != 4000 {
+		t.Errorf("port = %d, want the spec's value", r.Port)
+	}
+	if r.Build.Start != "node dist/main.js" || r.Build.Builder != "node:20-alpine" {
+		t.Errorf("overrides not honoured: %+v", r.Build)
+	}
+}
+
+// A project publix cannot work out how to run must fail validation with a
+// message naming the setting that would fix it, rather than producing a
+// Dockerfile that dies halfway through a build.
+func TestUnbuildableProjectFailsWithGuidance(t *testing.T) {
+	sp, err := Parse([]byte("type: framework\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = sp.Resolve(writeRepo(t, map[string]string{"README.md": "hi"}))
+	if err == nil {
+		t.Fatal("expected validation to fail")
+	}
+	if !strings.Contains(err.Error(), "build.start") {
+		t.Errorf("the error should name the setting that fixes it:\n%s", err)
+	}
+}
+
+// A SvelteKit repo's adapter decides its kind, and that lives in a config
+// file — the case this whole detection path exists for.
+func TestSvelteKitAdapterDecidesKind(t *testing.T) {
+	pkg := `{"devDependencies":{"@sveltejs/kit":"2","vite":"5"},"scripts":{"build":"vite build"}}`
+
+	static := resolve(t, "", map[string]string{
+		"package.json":     pkg,
+		"svelte.config.js": "import adapter from '@sveltejs/adapter-static';\nexport default { kit: { adapter: adapter() } };",
+	})
+	if static.Kind != KindStatic {
+		t.Errorf("adapter-static should resolve to a static site, got %q", static.Kind)
+	}
+
+	server := resolve(t, "", map[string]string{
+		"package.json":     pkg,
+		"svelte.config.js": "import adapter from '@sveltejs/adapter-node';\nexport default { kit: { adapter: adapter() } };",
+	})
+	if server.Kind != KindFramework {
+		t.Errorf("adapter-node should resolve to a framework server, got %q", server.Kind)
 	}
 }

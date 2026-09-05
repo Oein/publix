@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -27,7 +28,12 @@ type projectView struct {
 	Latest   *store.Deployment `json:"latest,omitempty"`
 	Building bool              `json:"building"`
 	Kind     string            `json:"kind,omitempty"`
-	Volumes  []string          `json:"volumes,omitempty"`
+	// Framework is the detected stack, e.g. "nextjs". The dashboard shows
+	// an icon for it, which is how a grid of projects becomes scannable.
+	Framework string `json:"framework,omitempty"`
+	// FrameworkName is the human label, e.g. "Next.js".
+	FrameworkName string   `json:"frameworkName,omitempty"`
+	Volumes       []string `json:"volumes,omitempty"`
 }
 
 func (s *Server) view(p *store.Project) projectView {
@@ -42,15 +48,33 @@ func (s *Server) view(p *store.Project) projectView {
 	if live := p.LiveDeployment(); live != nil {
 		v.Live = live
 		v.Kind = live.Kind
-		if live.Spec != "" {
-			if parsed, err := deployspec.Parse([]byte(live.Spec)); err == nil {
-				sp = parsed
-				for _, vol := range parsed.Volumes {
-					v.Volumes = append(v.Volumes, vol.Name)
-				}
+		if parsed, err := parseSpec(live.Spec); err == nil {
+			sp = parsed
+			v.Framework = parsed.Framework
+			for _, vol := range parsed.Volumes {
+				v.Volumes = append(v.Volumes, vol.Name)
 			}
 		}
 	}
+
+	// What a project *is* does not depend on whether its last deploy
+	// worked. Fall back to the most recent attempt so a project that has
+	// never deployed successfully still shows what it is built with.
+	if v.Framework == "" && v.Latest != nil {
+		if v.Kind == "" {
+			v.Kind = v.Latest.Kind
+		}
+		if parsed, err := parseSpec(v.Latest.Spec); err == nil {
+			v.Framework = parsed.Framework
+		}
+	}
+	// Fall back to the build kind so a Dockerfile or compose project still
+	// gets a meaningful mark rather than a blank tile.
+	if v.Framework == "" {
+		v.Framework = v.Kind
+	}
+	v.FrameworkName = frameworkLabel(v.Framework)
+
 	for _, r := range traefik.Hosts(&set, p, sp) {
 		if r.RedirectTo == "" {
 			v.Hosts = append(v.Hosts, r.Domain+r.Path)
@@ -588,4 +612,33 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// parseSpec decodes a stored spec snapshot.
+func parseSpec(raw string) (*deployspec.Spec, error) {
+	if raw == "" {
+		return nil, errNoSpec
+	}
+	return deployspec.Parse([]byte(raw))
+}
+
+var errNoSpec = errors.New("no spec recorded")
+
+// frameworkLabels are the human names shown beside a project's icon.
+var frameworkLabels = map[string]string{
+	"nextjs": "Next.js", "nuxt": "Nuxt", "sveltekit": "SvelteKit",
+	"remix": "Remix", "astro": "Astro", "nestjs": "NestJS",
+	"gatsby": "Gatsby", "docusaurus": "Docusaurus", "angular": "Angular",
+	"cra": "React", "vite": "Vite", "node": "Node.js",
+	"go": "Go", "python": "Python", "django": "Django",
+	"fastapi": "FastAPI", "flask": "Flask",
+	"compose": "Docker Compose", "dockerfile": "Dockerfile",
+	"static": "Static site", "framework": "Auto-detected", "image": "Prebuilt image",
+}
+
+func frameworkLabel(id string) string {
+	if name, ok := frameworkLabels[id]; ok {
+		return name
+	}
+	return id
 }

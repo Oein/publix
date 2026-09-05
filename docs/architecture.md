@@ -58,6 +58,49 @@ By keeping the moving part in a file:
 - **Unrelated projects are undisturbed.** The file is rewritten only when its
   content actually changes.
 
+## Detection reads the repository, not just its file names
+
+Knowing a repository is "a Node project" is not enough to deploy it. A
+SvelteKit app with `adapter-static` is a folder of files; the same app with
+`adapter-node` is a long-running server. An Astro project is static until
+someone sets `output: 'server'`. A Next.js app builds a one-gigabyte image
+unless its config says `output: 'standalone'`, in which case it builds a
+hundred-megabyte one.
+
+None of that is visible from a directory listing. It is written in the
+project's own config file, so that is what publix reads.
+
+The same detection code runs in two places, against an abstraction over
+"a repository" rather than over "a directory":
+
+- **The import screen**, against the GitHub API. One call lists the root,
+  and individual config files are fetched only when detection needs them —
+  so publix can tell you a repository is a standalone Next.js app before it
+  has cloned a byte of it.
+- **The deploy**, against the checkout on disk.
+
+Because both run the same code, what the import screen promises is what the
+build does.
+
+## Generated Dockerfiles
+
+When a repository has no Dockerfile and no compose file, publix writes one:
+a multi-stage build with dependencies in their own layer, a production-only
+runtime stage, and an unprivileged user.
+
+Three properties are deliberate:
+
+- **It is never written to the repository.** The file is injected into the
+  build context and discarded. Committing a Dockerfile is how you take
+  over, and detection then defers to it completely.
+- **It is printed into the build log.** It exists nowhere else, so that is
+  the only place a user can see what was actually built.
+- **It never installs system packages.** No `apk add`, no `apt-get`. A
+  build that works on one network and fails on another is worse than one
+  that never worked, because it fails only in production. Where a runtime
+  needs CA certificates, they are copied from the build stage, which
+  already has them.
+
 ## A deploy, phase by phase
 
 ```

@@ -9,6 +9,7 @@ import (
 
 	"github.com/Oein/publix/internal/deployspec"
 	"github.com/Oein/publix/internal/engine"
+	"github.com/Oein/publix/internal/framework"
 	"github.com/Oein/publix/internal/github"
 	"github.com/Oein/publix/internal/store"
 	"gopkg.in/yaml.v3"
@@ -204,6 +205,7 @@ type inspection struct {
 	Branches  []string             `json:"branches"`
 	HasSpec   bool                 `json:"hasSpec"`
 	Spec      string               `json:"spec,omitempty"`
+	SpecPath  string               `json:"specPath,omitempty"`
 	Detection deployspec.Detection `json:"detection"`
 	// Suggested is the deployment.yaml publix would write for this repo.
 	Suggested string   `json:"suggested"`
@@ -219,7 +221,7 @@ func (s *Server) handleInspectRepo(w http.ResponseWriter, r *http.Request) {
 	}
 	owner, name := r.PathValue("owner"), r.PathValue("repo")
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 	defer cancel()
 
 	repo, err := gh.GetRepo(ctx, owner, name)
@@ -227,10 +229,7 @@ func (s *Server) handleInspectRepo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err)
 		return
 	}
-	ref := r.URL.Query().Get("ref")
-	if ref == "" {
-		ref = repo.DefaultBranch
-	}
+	ref := firstNonEmpty(r.URL.Query().Get("ref"), repo.DefaultBranch)
 
 	out := inspection{Repo: repo}
 	if branches, err := gh.ListBranches(ctx, owner, name); err == nil {
@@ -244,36 +243,38 @@ func (s *Server) handleInspectRepo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err)
 		return
 	}
-	present := map[string]bool{}
+	paths := make([]string, 0, len(entries))
 	for _, e := range entries {
 		out.Files = append(out.Files, e.Path)
 		if e.Type == "file" {
-			present[e.Path] = true
+			paths = append(paths, e.Path)
 		}
 	}
+
+	// Detection runs against the repository over the API, reading only the
+	// few config files it actually needs. It is the same code the deploy
+	// runs against a checkout, so what this screen promises is what the
+	// build will do.
+	src := framework.NewFiles(paths, func(p string) ([]byte, error) {
+		return gh.GetFile(ctx, owner, name, p, ref)
+	})
+	out.Detection = deployspec.DetectFrom(src)
 
 	for _, candidate := range deployspec.Filenames {
-		if present[candidate] {
-			if raw, err := gh.GetFile(ctx, owner, name, candidate, ref); err == nil {
-				out.HasSpec, out.Spec = true, string(raw)
-			}
-			break
+		if !src.Exists(candidate) {
+			continue
 		}
+		if raw, err := gh.GetFile(ctx, owner, name, candidate, ref); err == nil {
+			out.HasSpec, out.Spec, out.SpecPath = true, string(raw), candidate
+		}
+		break
 	}
 
-	out.Detection = detectFromListing(present)
 	if out.HasSpec {
 		if _, err := deployspec.Parse([]byte(out.Spec)); err != nil {
-			out.Warnings = append(out.Warnings, "The repository's deployment.yaml could not be parsed: "+err.Error())
+			out.Warnings = append(out.Warnings, "The repository's "+out.SpecPath+" could not be parsed: "+err.Error())
 		}
 	} else {
-		// Reading package.json sharpens the guess considerably, and it is
-		// one extra request.
-		if present["package.json"] {
-			if raw, err := gh.GetFile(ctx, owner, name, "package.json", ref); err == nil {
-				refineFromPackageJSON(&out.Detection, raw)
-			}
-		}
 		out.Suggested = suggestSpec(repo.Name, out.Detection)
 	}
 	out.Warnings = append(out.Warnings, out.Detection.Notes...)
@@ -515,70 +516,47 @@ func (s *Server) GitAuth(repo *store.Repo) (string, error) {
 	return gh.AuthenticateCloneURL(ctx, repo.CloneURL)
 }
 
-// detectFromListing infers a project kind from a root directory listing.
-func detectFromListing(present map[string]bool) deployspec.Detection {
-	for _, name := range deployspec.ComposeFilenames {
-		if present[name] {
-			return deployspec.Detection{Kind: deployspec.KindCompose, Compose: name, Framework: "Docker Compose"}
-		}
-	}
-	if present["Dockerfile"] {
-		return deployspec.Detection{Kind: deployspec.KindDockerfile, Dockerfile: "Dockerfile", Framework: "Dockerfile", Port: 3000}
-	}
-	if present["package.json"] {
-		return deployspec.Detection{Kind: deployspec.KindStatic, Framework: "Node.js", Output: "dist", Port: 80}
-	}
-	if present["index.html"] {
-		return deployspec.Detection{Kind: deployspec.KindStatic, Framework: "Static HTML", Output: ".", Port: 80}
-	}
-	return deployspec.Detection{
-		Kind: deployspec.KindDockerfile,
-		Notes: []string{
-			"No Dockerfile, compose file or package.json was found at the repository root. Add one, or point the project at a subdirectory.",
-		},
-	}
-}
-
-// refineFromPackageJSON sharpens a listing-based guess using the manifest.
-func refineFromPackageJSON(d *deployspec.Detection, raw []byte) {
-	det := deployspec.DetectFromPackageJSON(raw)
-	if det == nil {
-		return
-	}
-	if d.Kind == deployspec.KindCompose || d.Dockerfile != "" {
-		// The repository already says how it wants to be built; only take
-		// the framework name for display.
-		d.Framework = det.Framework
-		return
-	}
-	*d = *det
-}
-
-// suggestSpec renders the deployment.yaml publix would use, which the import
-// screen shows and can optionally commit.
+// suggestSpec renders the deployment.yaml publix would use, which the
+// import screen shows and can optionally commit to the repository.
+//
+// It is deliberately short. Everything publix can work out for itself is
+// left out, so what remains is only what a human might want to change.
 func suggestSpec(repoName string, det deployspec.Detection) string {
 	sp := deployspec.Spec{Name: store.Slugify(repoName), Kind: det.Kind}
+
 	switch det.Kind {
 	case deployspec.KindCompose:
-		sp.Compose = det.Compose
-		sp.Service = det.Service
-		sp.Port = det.Port
+		sp.Compose, sp.Service, sp.Port = det.Compose, det.Service, det.Port
+	case deployspec.KindDockerfile:
+		sp.Dockerfile, sp.Port = firstNonEmpty(det.Dockerfile, "Dockerfile"), det.Port
+	case deployspec.KindFramework:
+		// The framework template supplies install, build and start, so the
+		// file only needs to name the framework and the port.
+		sp.Framework, sp.Port = det.Framework, det.Port
 	case deployspec.KindStatic:
-		sp.Build.Install = det.Install
-		sp.Build.Command = det.Command
-		sp.Build.Output = det.Output
-		sp.Build.SPA = det.SPA
 		sp.Port = det.Port
-	default:
-		sp.Dockerfile = firstNonEmpty(det.Dockerfile, "Dockerfile")
-		sp.Port = det.Port
+		// Only record what differs from what detection would infer again.
+		if det.Framework == "" {
+			sp.Build.Install, sp.Build.Command, sp.Build.Output = det.Install, det.Command, det.Output
+			if det.SPA {
+				spa := true
+				sp.Build.SPA = &spa
+			}
+		} else {
+			sp.Framework = det.Framework
+		}
 	}
 
 	raw, err := yaml.Marshal(sp)
 	if err != nil {
 		return ""
 	}
-	return "# Generated by publix. Edit freely — this file is the source of truth.\n" + string(raw)
+	head := "# Generated by publix. Edit freely — this file is the source of truth.\n"
+	if det.Generated {
+		head += "# publix builds this " + det.Name + " project with a generated Dockerfile;\n" +
+			"# commit your own Dockerfile at any time to take over.\n"
+	}
+	return head + string(raw)
 }
 
 func firstLine(s string) string {

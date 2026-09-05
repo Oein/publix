@@ -6,6 +6,7 @@
   import Badge from '../lib/Badge.svelte';
   import Button from '../lib/Button.svelte';
   import Confirm from '../lib/Confirm.svelte';
+  import FrameworkIcon from '../lib/FrameworkIcon.svelte';
   import Overview from './project/Overview.svelte';
   import Deployments from './project/Deployments.svelte';
   import Logs from './project/Logs.svelte';
@@ -86,6 +87,7 @@
   <header class="head">
     <div class="grow">
       <div class="row wrap">
+        <FrameworkIcon framework={project.framework} title={project.frameworkName} size={24} />
         <h1>{project.name}</h1>
         {#if project.building}
           <Badge tone="busy" dot>Building</Badge>
@@ -104,6 +106,10 @@
           </a>
         {:else}
           <span class="faint">No domain yet</span>
+        {/if}
+        {#if project.frameworkName}
+          <span class="sep">·</span>
+          <span class="muted nowrap">{project.frameworkName}</span>
         {/if}
         {#if project.repo}
           <span class="sep">·</span>

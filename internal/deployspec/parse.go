@@ -3,6 +3,7 @@ package deployspec
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Oein/publix/internal/compose"
+	"github.com/Oein/publix/internal/framework"
 	"gopkg.in/yaml.v3"
 )
 
@@ -58,26 +60,40 @@ func Parse(raw []byte) (*Spec, error) {
 	return &s, nil
 }
 
+// ComposeFilenames are the conventional compose file names.
+var ComposeFilenames = []string{
+	"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml",
+}
+
 // Resolve fills in everything the spec left unsaid by inspecting the
 // checkout at root, then validates the result.
 //
 // This is where "one file, and a short one" becomes possible: the spec
-// carries only what the repository cannot tell us.
+// carries only what the repository cannot tell us about itself.
 func (s *Spec) Resolve(root string) (*Resolved, error) {
-	out := *s // work on a copy; the caller's spec stays as written
+	return s.ResolveFrom(root, framework.Dir(root))
+}
 
-	det := Detect(root)
+// ResolveFrom resolves against an explicit source, so the same code path
+// serves a local checkout and a repository inspected over the GitHub API.
+func (s *Spec) ResolveFrom(root string, src framework.Source) (*Resolved, error) {
+	out := *s // work on a copy; the caller's spec stays as written
+	det := DetectFrom(src)
 
 	if out.Kind == "" || out.Kind == KindAuto {
-		out.Kind = det.Kind
-		if out.Image != "" {
+		// An explicit field in deployment.yaml is a decision; detection is
+		// only a guess, so the field wins.
+		switch {
+		case out.Image != "":
 			out.Kind = KindImage
-		} else if out.Build.Output != "" {
-			out.Kind = KindStatic
-		} else if out.Compose != "" {
+		case out.Compose != "":
 			out.Kind = KindCompose
-		} else if out.Dockerfile != "" {
+		case out.Dockerfile != "":
 			out.Kind = KindDockerfile
+		case out.Build.Output != "" && out.Framework == "":
+			out.Kind = KindStatic
+		default:
+			out.Kind = det.Kind
 		}
 	}
 	if out.Context == "" {
@@ -91,7 +107,7 @@ func (s *Spec) Resolve(root string) (*Resolved, error) {
 		}
 		if out.Compose == "" {
 			for _, n := range ComposeFilenames {
-				if exists(filepath.Join(root, n)) {
+				if src.Exists(n) {
 					out.Compose = n
 					break
 				}
@@ -103,36 +119,37 @@ func (s *Spec) Resolve(root string) (*Resolved, error) {
 		if out.Port == 0 {
 			out.Port = det.Port
 		}
+
 	case KindDockerfile:
 		if out.Dockerfile == "" {
-			if det.Dockerfile != "" {
-				out.Dockerfile = det.Dockerfile
-			} else {
-				out.Dockerfile = "Dockerfile"
-			}
+			out.Dockerfile = firstNonEmpty(det.Dockerfile, "Dockerfile")
 		}
 		if out.Port == 0 {
 			out.Port = det.Port
 		}
-	case KindStatic:
-		if out.Build.Output == "" {
-			out.Build.Output = det.Output
+
+	case KindFramework, KindStatic:
+		// Everything here comes from the framework template unless the
+		// spec overrode it, so a Next.js repository needs no build block
+		// at all and a fussy one can still say exactly what it wants.
+		if out.Framework == "" {
+			out.Framework = det.Framework
 		}
-		if out.Build.Command == "" {
-			out.Build.Command = det.Command
-		}
-		if out.Build.Install == "" {
-			out.Build.Install = det.Install
-		}
-		if out.Build.Runtime == "" {
-			out.Build.Runtime = "nginx:1.27-alpine"
-		}
-		if !out.Build.SPA && det.SPA {
-			out.Build.SPA = true
+		fill(&out.Build.Install, det.Install)
+		fill(&out.Build.Command, det.Command)
+		fill(&out.Build.Start, det.Start)
+		fill(&out.Build.Output, det.Output)
+		if out.Build.SPA == nil && det.SPA {
+			spa := true
+			out.Build.SPA = &spa
 		}
 		if out.Port == 0 {
+			out.Port = det.Port
+		}
+		if out.Kind == KindStatic && out.Port == 0 {
 			out.Port = 80
 		}
+
 	case KindImage:
 		if out.Port == 0 {
 			out.Port = det.Port
@@ -142,10 +159,17 @@ func (s *Spec) Resolve(root string) (*Resolved, error) {
 	out.applyDefaults()
 
 	r := &Resolved{Spec: &out, Detection: det, Root: root}
-	if err := r.validate(); err != nil {
+	if err := r.validate(src); err != nil {
 		return nil, err
 	}
 	return r, nil
+}
+
+// fill sets dst from src only when dst is still empty.
+func fill(dst *string, src string) {
+	if *dst == "" {
+		*dst = src
+	}
 }
 
 // Resolved is a spec with every default filled in and validated against a
@@ -249,7 +273,7 @@ var volNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
 
 // validate reports every problem at once. A user fixing their deployment.yaml
 // should see the whole list, not discover one more on each retry.
-func (r *Resolved) validate() error {
+func (r *Resolved) validate(src framework.Source) error {
 	s := r.Spec
 	var errs []string
 	add := func(format string, args ...any) { errs = append(errs, fmt.Sprintf(format, args...)) }
@@ -260,24 +284,40 @@ func (r *Resolved) validate() error {
 
 	switch s.Kind {
 	case KindDockerfile:
-		p := filepath.Join(r.Root, s.Context, s.Dockerfile)
-		if !exists(p) {
-			add("dockerfile: %q does not exist in the repository", filepath.Join(s.Context, s.Dockerfile))
+		rel := path.Join(s.Context, s.Dockerfile)
+		if !src.Exists(rel) {
+			add("dockerfile: %q does not exist in the repository", rel)
 		}
 		if s.Port <= 0 {
 			add("port: is required — publix could not infer it, so add the port your app listens on")
+		}
+
+	case KindFramework:
+		// A generated Dockerfile needs a start command and a port. Both
+		// are normally detected; reaching here without them means
+		// detection could not tell, and guessing would fail deep inside a
+		// build instead of here.
+		if s.Build.Start == "" {
+			add("build.start: is required — publix could not work out how to run this project%s", detectionHint(r.Detection))
+		}
+		if s.Port <= 0 {
+			add("port: is required — the port your app listens on")
 		}
 	case KindCompose:
 		if s.Compose == "" {
 			add("compose: no compose file found; name one explicitly")
 			break
 		}
-		p := filepath.Join(r.Root, s.Compose)
-		if !exists(p) {
+		if !src.Exists(s.Compose) {
 			add("compose: %q does not exist in the repository", s.Compose)
 			break
 		}
-		f, err := compose.Parse(p)
+		raw, err := src.Read(s.Compose)
+		if err != nil {
+			add("compose: %v", err)
+			break
+		}
+		f, err := compose.ParseBytes(raw, s.Compose)
 		if err != nil {
 			add("compose: %v", err)
 			break
@@ -300,7 +340,7 @@ func (r *Resolved) validate() error {
 		}
 	case KindStatic:
 		if s.Build.Output == "" {
-			add("build.output: is required for a static site (the directory your build writes, e.g. \"dist\")")
+			add("build.output: is required for a static site (the directory your build writes, e.g. \"dist\")%s", detectionHint(r.Detection))
 		} else if strings.HasPrefix(s.Build.Output, "/") || strings.Contains(s.Build.Output, "..") {
 			add("build.output: %q must be a relative path inside the repository", s.Build.Output)
 		}
@@ -312,7 +352,7 @@ func (r *Resolved) validate() error {
 			add("port: is required for type: image")
 		}
 	default:
-		add("type: %q is not one of auto, dockerfile, compose, static, image", s.Kind)
+		add("type: %q is not one of auto, dockerfile, compose, framework, static, image", s.Kind)
 	}
 
 	if s.Port < 0 || s.Port > 65535 {
@@ -513,4 +553,25 @@ func ParseSize(s string) (int64, error) {
 		return 0, fmt.Errorf("%q is not a valid size (use e.g. \"512M\" or \"2G\")", s)
 	}
 	return int64(n * float64(mult)), nil
+}
+
+// detectionHint appends what publix did work out, so an error that asks for
+// a setting also says why it could not supply one itself.
+func detectionHint(d Detection) string {
+	if len(d.Notes) > 0 {
+		return ".\n    " + d.Notes[0]
+	}
+	if d.Name != "" && d.Name != "Unknown" {
+		return " (it looks like " + d.Name + ")"
+	}
+	return ""
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
