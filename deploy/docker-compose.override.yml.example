@@ -1,0 +1,28 @@
+# Copy to docker-compose.override.yml to add anything of your own.
+#
+# This file is yours: it is gitignored and never touched by an upgrade,
+# which is exactly why it exists. The tracked docker-compose.yml is
+# replaced wholesale when publix updates itself, so an edit made there
+# would be lost — along with, typically, the volume mounts your projects
+# depend on.
+#
+# scripts/install.sh includes it automatically when it is present. Running
+# compose by hand, pass both files:
+#
+#   docker compose -f deploy/docker-compose.yml \
+#                  -f deploy/docker-compose.override.yml up -d
+
+services:
+  publix:
+    volumes:
+      # Every volume you register in the dashboard must be mounted here at
+      # the SAME path on both sides. publix hands paths to the Docker
+      # daemon, which resolves them on the host — so a path that means one
+      # thing inside the container and another outside produces projects
+      # bind-mounting the wrong directory.
+      - /mnt/data:/mnt/data
+
+  # Traefik rarely needs anything, but the same rule applies if it does.
+  # traefik:
+  #   volumes:
+  #     - /etc/ssl/private:/etc/ssl/private:ro

@@ -72,10 +72,10 @@ services:
       # Identical paths, per the rule above.
       - /var/lib/publix:/var/lib/publix
       - /etc/traefik/dynamic:/etc/traefik/dynamic
-      # Shared volumes you register in the dashboard must be mounted here
-      # too, at the same path, or the projects that ask for them will bind
-      # a directory that does not exist on the host:
-      # - /mnt/data:/mnt/data
+      # Volumes you register in the dashboard must be mounted here too, at
+      # the same path. Do not add them to this file: it is replaced on
+      # every upgrade. Copy docker-compose.override.yml.example to
+      # docker-compose.override.yml and put them there instead.
     environment:
       PUBLIX_HOME: /var/lib/publix
       PUBLIX_ADDR: 0.0.0.0:4321

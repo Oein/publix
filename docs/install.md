@@ -326,6 +326,27 @@ routing from its own state. The dashboard's HTML is served `no-cache` with
 fingerprinted assets, so a normal page load picks up the new build — no hard
 refresh needed.
 
+### Adding your own compose settings
+
+Volumes you register in the dashboard have to be mounted into the publix
+container at the same path on both sides. Put those in
+`deploy/docker-compose.override.yml` — never in `docker-compose.yml`, which
+an upgrade replaces wholesale, taking your mounts with it.
+
+```bash
+cd /opt/publix
+sudo cp deploy/docker-compose.override.yml.example deploy/docker-compose.override.yml
+sudo nano deploy/docker-compose.override.yml
+```
+
+The installer includes it automatically when it exists. Running compose by
+hand, pass both files:
+
+```bash
+sudo docker compose -f deploy/docker-compose.yml \
+                    -f deploy/docker-compose.override.yml up -d
+```
+
 ### Backing up
 
 One file matters: `/var/lib/publix/publix.json`. It holds your projects,
