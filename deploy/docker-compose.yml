@@ -15,7 +15,13 @@ name: publix
 
 services:
   traefik:
-    image: traefik:v3.3
+    # 3.6 or newer, and not by taste: every Traefik up to 3.5 asks the
+    # daemon for Docker API 1.24, and Docker Engine 29 raised its floor to
+    # 1.40. On such a host the docker provider dies in a retry loop, Traefik
+    # discovers no containers at all, and every project router in publix.yml
+    # points at a service that never appears. DOCKER_API_VERSION does not
+    # help — the provider pins its version in code and never negotiates.
+    image: traefik:v3.6
     restart: unless-stopped
     command:
       - --providers.docker=true
@@ -32,14 +38,6 @@ services:
       - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
       - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
       - --log.level=INFO
-    environment:
-      # Traefik's docker provider asks for API 1.24, and Docker Engine 29
-      # raised its floor to 1.40 — so without this the provider dies in a
-      # retry loop, Traefik sees no containers at all, and every project
-      # router in publix.yml points at a service that never appears. The
-      # docker client reads this variable and skips its own negotiation,
-      # which is what fails against a daemon that refuses 1.24 outright.
-      DOCKER_API_VERSION: ${DOCKER_API_VERSION:-1.44}
     ports:
       - "80:80"
       - "443:443"
