@@ -348,6 +348,21 @@ sudo install -m 600 /var/lib/publix/publix.json /root/publix-backup.json
 
 ## When something is wrong
 
+**Everything answers 404, and `docker compose logs traefik` repeats
+"client version 1.24 is too old".** Traefik's docker provider asks for
+Docker API 1.24; Docker Engine 29 raised its floor to 1.40. Traefik then
+sees no containers at all, so every project router points at a service that
+never appears. The compose file pins `DOCKER_API_VERSION` for the Traefik
+container to fix this; if you are on an older checkout, add it:
+
+```yaml
+  traefik:
+    environment:
+      DOCKER_API_VERSION: "1.44"
+```
+
+Then `docker compose -f deploy/docker-compose.yml up -d traefik`.
+
 **The installer stops on Docker's signing key.** The server cannot reach
 `download.docker.com`. Install Docker another way and re-run with
 `--skip-docker`.
