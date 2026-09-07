@@ -348,6 +348,12 @@ sudo install -m 600 /var/lib/publix/publix.json /root/publix-backup.json
 
 ## When something is wrong
 
+**The dashboard answers 404 and `/etc/traefik/dynamic/publix.yml` is
+`http: {}`.** An older publix wrote that file even with nothing to route,
+and Traefik discards its whole file-provider directory over it — taking the
+dashboard's own router down with it. Upgrade, or just delete the file:
+publix now removes it instead of writing it empty.
+
 **Everything answers 404, and `docker compose logs traefik` repeats
 "client version 1.24 is too old".** Traefik's docker provider asks for
 Docker API 1.24; Docker Engine 29 raised its floor to 1.40. Traefik then

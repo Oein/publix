@@ -368,18 +368,38 @@ func Path(set *store.Settings) string {
 	return filepath.Join(set.TraefikDynamicDir, DynamicFilename)
 }
 
+// Empty reports whether this configuration routes nothing at all.
+func (d *Dynamic) Empty() bool {
+	return len(d.HTTP.Routers) == 0 && len(d.HTTP.Services) == 0 && len(d.HTTP.Middlewares) == 0
+}
+
 // Write renders the configuration into Traefik's file provider directory.
 //
 // The write is atomic and is skipped entirely when nothing changed, so one
 // project's deploy never makes Traefik reload every route on the host.
+//
+// With nothing to route the file is removed rather than written empty. A
+// file whose http section has no content makes Traefik discard the entire
+// file-provider directory — including the hand-written router that serves
+// publix's own dashboard, which sits beside this one. So a server with no
+// live deployment would take its own dashboard offline, and the only clue
+// would be a 404 on a hostname whose router is plainly there on disk.
 func Write(set *store.Settings, d *Dynamic) error {
-	raw, err := d.Render()
-	if err != nil {
-		return err
-	}
 	path := Path(set)
 	if err := os.MkdirAll(set.TraefikDynamicDir, 0o755); err != nil {
 		return fmt.Errorf("cannot create the Traefik dynamic directory %s: %w\n\nPoint `traefikDynamicDir` at a directory publix can write to.", set.TraefikDynamicDir, err)
+	}
+
+	if d.Empty() {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("cannot remove %s: %w", path, err)
+		}
+		return nil
+	}
+
+	raw, err := d.Render()
+	if err != nil {
+		return err
 	}
 	if existing, err := os.ReadFile(path); err == nil && string(existing) == string(raw) {
 		return nil

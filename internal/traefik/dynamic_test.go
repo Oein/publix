@@ -1,6 +1,7 @@
 package traefik
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -369,5 +370,62 @@ func TestRedirectValidation(t *testing.T) {
 	// Editing a rule in place must not collide with itself.
 	if err := set.ValidateRedirect(store.Redirect{Domain: "taken.example.com", Target: "c.example.com"}, "taken.example.com"); err != nil {
 		t.Errorf("editing a rule in place was rejected: %v", err)
+	}
+}
+
+// A file whose http section has no content makes Traefik discard the whole
+// file-provider directory, which on a real server took down the
+// hand-written router serving publix's own dashboard. A server with nothing
+// deployed must leave no file at all.
+func TestWriteRemovesTheFileWhenNothingIsRouted(t *testing.T) {
+	dir := t.TempDir()
+	set := settings()
+	set.TraefikDynamicDir = dir
+	path := Path(set)
+
+	// Something live first, so there is a file to remove.
+	if err := Write(set, Build(set, []Live{{
+		Project: project("api", "api.example.com"), Spec: spec(t, "port: 8080\n"), Deployment: "d1",
+	}})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("nothing was written for a live project: %v", err)
+	}
+
+	// Now nothing is live.
+	if err := Write(set, Build(set, nil)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		raw, _ := os.ReadFile(path)
+		t.Fatalf("the file survived with nothing to route:\n%s", raw)
+	}
+
+	// Removing it again is not an error: reconcile runs on every deploy.
+	if err := Write(set, Build(set, nil)); err != nil {
+		t.Fatalf("removing an absent file failed: %v", err)
+	}
+}
+
+// Whatever Write does with an empty configuration, it must never leave a
+// file behind that says nothing — that is the shape Traefik chokes on.
+func TestRenderedFileAlwaysCarriesContent(t *testing.T) {
+	dir := t.TempDir()
+	set := settings()
+	set.TraefikDynamicDir = dir
+
+	if err := Write(set, Build(set, nil)); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(Path(set))
+	if os.IsNotExist(err) {
+		return // No file at all is the correct outcome.
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "http: {}") {
+		t.Errorf("wrote an empty http section, which disables Traefik's whole file provider:\n%s", raw)
 	}
 }
