@@ -18,7 +18,6 @@
     try {
       settings = await api.settings.get();
       form = {
-        appsDomain: settings.appsDomain ?? '',
         publicUrl: settings.publicUrl ?? '',
         network: settings.network,
         traefikDynamicDir: settings.traefikDynamicDir,
@@ -47,7 +46,6 @@
     saving = true;
     try {
       settings = await api.settings.update({
-        appsDomain: form.appsDomain.trim(),
         publicUrl: form.publicUrl.trim(),
         network: form.network.trim(),
         traefikDynamicDir: form.traefikDynamicDir.trim(),
@@ -112,12 +110,6 @@
 {#if settings}
   <Card title={t('server.addresses')}>
     <div class="form">
-      <Field label={t('server.appsDomain')} hint={t('server.appsDomainHint')}>
-        {#snippet children(id)}
-          <input {id} bind:value={form.appsDomain} placeholder="apps.example.com" autocomplete="off" />
-        {/snippet}
-      </Field>
-
       <Field label={t('server.publicUrl')} hint={t('server.publicUrlHint')}>
         {#snippet children(id)}
           <input {id} bind:value={form.publicUrl} placeholder="https://publix.example.com" autocomplete="off" />

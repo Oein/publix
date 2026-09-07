@@ -105,12 +105,24 @@
     </div>
   {:else if repos.length === 0}
     <div class="panel">
-      <Empty
-        title={t('import.noReposTitle')}
-        description={t('import.noReposDesc')}
-      >
-        <a href="#/settings/github"><Button size="sm">{t('import.reviewSettings')}</Button></a>
-      </Empty>
+      <!-- An App can connect perfectly and still show nothing, because
+           connecting and granting repository access are separate steps on
+           GitHub's side. Say which one is missing rather than listing both
+           possibilities. -->
+      {#if status.mode === 'app' && status.installationUrl}
+        <Empty
+          title={t('import.noReposAppTitle')}
+          description={t('import.noReposAppDesc', { account: status.login || '—' })}
+        >
+          <a href={status.installationUrl} target="_blank" rel="noreferrer noopener">
+            <Button size="sm" variant="primary">{t('import.manageAccess')} ↗</Button>
+          </a>
+        </Empty>
+      {:else}
+        <Empty title={t('import.noReposTitle')} description={t('import.noReposDesc')}>
+          <a href="#/settings/github"><Button size="sm">{t('import.reviewSettings')}</Button></a>
+        </Empty>
+      {/if}
     </div>
   {:else if filtered.length === 0}
     <div class="panel">

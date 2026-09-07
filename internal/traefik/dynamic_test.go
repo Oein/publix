@@ -14,7 +14,7 @@ func settings() *store.Settings {
 		Network:      "publix",
 		EntryPoints:  []string{"websecure"},
 		CertResolver: "letsencrypt",
-		AppsDomain:   "apps.example.com",
+		AppsDomains:  []store.AppsDomain{{Domain: "apps.example.com", Default: true}},
 	}
 }
 
@@ -216,5 +216,158 @@ func TestSlugCollisionResistance(t *testing.T) {
 		if len(got) > 63 || got == "" {
 			t.Errorf("Slug(%q) = %q is not a usable DNS label", s, got)
 		}
+	}
+}
+
+// The point of registering several parent domains: two projects on one
+// server can sit under different ones.
+func TestProjectsRouteUnderTheirOwnAppsDomain(t *testing.T) {
+	set := settings()
+	set.AppsDomains = append(set.AppsDomains, store.AppsDomain{Domain: "staging.example.com"})
+
+	blog := project("blog")
+	preview := project("preview")
+	preview.AppsDomain = "staging.example.com"
+	quiet := project("quiet")
+	quiet.AppsDomain = store.AppsDomainNone
+
+	d := Build(set, []Live{
+		{Project: blog, Spec: spec(t, "port: 8080\n"), Deployment: "d1"},
+		{Project: preview, Spec: spec(t, "port: 8080\n"), Deployment: "d2"},
+		{Project: quiet, Spec: spec(t, "port: 8080\n"), Deployment: "d3"},
+	})
+
+	var rules []string
+	for _, r := range d.HTTP.Routers {
+		rules = append(rules, r.Rule)
+	}
+	joined := strings.Join(rules, " ")
+
+	for _, want := range []string{"blog.apps.example.com", "preview.staging.example.com"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("no router for %s; rules were %v", want, rules)
+		}
+	}
+	if strings.Contains(joined, "quiet.") {
+		t.Errorf("a project that opted out still got a generated hostname: %v", rules)
+	}
+}
+
+// A project that opted out of a generated hostname still has to be
+// reachable on the domains it does declare.
+func TestOptingOutKeepsCustomDomains(t *testing.T) {
+	set := settings()
+	p := project("quiet", "quiet.example.com")
+	p.AppsDomain = store.AppsDomainNone
+
+	d := Build(set, []Live{{Project: p, Spec: spec(t, "port: 8080\n"), Deployment: "d1"}})
+
+	var rules []string
+	for _, r := range d.HTTP.Routers {
+		rules = append(rules, r.Rule)
+	}
+	joined := strings.Join(rules, " ")
+	if !strings.Contains(joined, "quiet.example.com") {
+		t.Errorf("the custom domain was dropped along with the generated one: %v", rules)
+	}
+	if strings.Contains(joined, "apps.example.com") {
+		t.Errorf("still routed under the apps domain: %v", rules)
+	}
+}
+
+func redirectFor(t *testing.T, d *Dynamic, host string) (*Router, *Middleware) {
+	t.Helper()
+	for _, r := range d.HTTP.Routers {
+		if !strings.Contains(r.Rule, "`"+host+"`") {
+			continue
+		}
+		if len(r.Middlewares) == 0 {
+			t.Fatalf("router for %s has no middleware, so nothing redirects", host)
+		}
+		return r, d.HTTP.Middlewares[r.Middlewares[0]]
+	}
+	t.Fatalf("no router for %s; routers were %v", host, d.HTTP.Routers)
+	return nil, nil
+}
+
+func TestServerRedirectForwardsAHostWithNoProject(t *testing.T) {
+	set := settings()
+	set.Redirects = []store.Redirect{{Domain: "old.example.com", Target: "new.example.com"}}
+
+	_, mw := redirectFor(t, Build(set, nil), "old.example.com")
+	if mw.RedirectRegex == nil {
+		t.Fatal("not a redirect")
+	}
+	if got := mw.RedirectRegex.Replacement; got != "https://new.example.com/${1}" {
+		t.Errorf("replacement = %q, want the path carried across", got)
+	}
+	if mw.RedirectRegex.Permanent {
+		t.Error("permanent by default: a 301 is cached forever and hard to take back")
+	}
+}
+
+// Dropping the path is what someone means by "send everyone to this page",
+// and a stray capture group would append the old path to it.
+func TestRedirectCanDiscardThePath(t *testing.T) {
+	keep := false
+	set := settings()
+	set.Redirects = []store.Redirect{{
+		Domain: "old.example.com", Target: "https://example.com/moved", KeepPath: &keep, Permanent: true,
+	}}
+
+	_, mw := redirectFor(t, Build(set, nil), "old.example.com")
+	if got := mw.RedirectRegex.Replacement; got != "https://example.com/moved" {
+		t.Errorf("replacement = %q, want the target exactly — a capture group would append the old\n"+
+			"path, and a trailing slash would turn /moved into /moved/", got)
+	}
+	if !mw.RedirectRegex.Permanent {
+		t.Error("permanent was requested and dropped")
+	}
+}
+
+// A forwarding rule must never take a hostname away from a project that
+// actually serves it, whichever was configured first.
+func TestProjectRoutesWinOverServerRedirects(t *testing.T) {
+	set := settings()
+	set.Redirects = []store.Redirect{{Domain: "app.example.com", Target: "elsewhere.example.com"}}
+
+	d := Build(set, []Live{{
+		Project:    project("app", "app.example.com"),
+		Spec:       spec(t, "port: 8080\n"),
+		Deployment: "dep1",
+	}})
+
+	for name, r := range d.HTTP.Routers {
+		if strings.Contains(r.Rule, "`app.example.com`") && len(r.Middlewares) > 0 {
+			t.Fatalf("router %s redirects a hostname the project serves", name)
+		}
+	}
+	if _, ok := d.HTTP.Middlewares["publix-fw-0-redirect"]; ok {
+		t.Error("the forwarding middleware was emitted anyway")
+	}
+}
+
+func TestRedirectValidation(t *testing.T) {
+	set := &store.Settings{Redirects: []store.Redirect{{Domain: "taken.example.com", Target: "a.example.com"}}}
+
+	bad := map[string]store.Redirect{
+		"no domain":     {Target: "a.example.com"},
+		"no target":     {Domain: "b.example.com"},
+		"not a host":    {Domain: "not a host", Target: "a.example.com"},
+		"self loop":     {Domain: "a.example.com", Target: "a.example.com"},
+		"duplicate":     {Domain: "taken.example.com", Target: "b.example.com"},
+		"relative path": {Domain: "c.example.com", Path: "docs", Target: "a.example.com"},
+	}
+	for name, r := range bad {
+		if err := set.ValidateRedirect(r, ""); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+	if err := set.ValidateRedirect(store.Redirect{Domain: "ok.example.com", Target: "https://a.example.com/x"}, ""); err != nil {
+		t.Errorf("a valid rule was rejected: %v", err)
+	}
+	// Editing a rule in place must not collide with itself.
+	if err := set.ValidateRedirect(store.Redirect{Domain: "taken.example.com", Target: "c.example.com"}, "taken.example.com"); err != nil {
+		t.Errorf("editing a rule in place was rejected: %v", err)
 	}
 }

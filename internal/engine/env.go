@@ -131,7 +131,7 @@ func envMap(env []string) map[string]string {
 // deploymentURL is the address that always points at exactly one
 // deployment. publix health-checks against it and the dashboard links to it.
 func (e *Engine) deploymentURL(dc *Context) string {
-	host := traefik.DeploymentHost(dc.Project.Slug, dc.Deployment.ID, dc.Settings.AppsDomain)
+	host := traefik.DeploymentHost(dc.Project.Slug, dc.Deployment.ID, dc.Settings.AppsDomainFor(dc.Project))
 	if host == "" {
 		return ""
 	}

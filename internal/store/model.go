@@ -40,6 +40,15 @@ type Project struct {
 	// merged with any declared in deployment.yaml.
 	Domains []string `json:"domains,omitempty"`
 
+	// AppsDomain is which registered parent this project's generated
+	// hostname sits under. Empty means the server's default, and
+	// AppsDomainNone means the project wants no generated hostname at all.
+	//
+	// It is stored per project rather than derived, because moving a
+	// project between parents changes the address people have bookmarked
+	// and has to be something someone chose.
+	AppsDomain string `json:"appsDomain,omitempty"`
+
 	// Env are project-level environment variables set in the dashboard.
 	// Values marked secret are never returned by the API.
 	Env []EnvVar `json:"env,omitempty"`

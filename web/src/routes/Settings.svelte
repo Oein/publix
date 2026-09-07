@@ -2,6 +2,7 @@
   import { route } from '../lib/router.js';
   import { t } from '../lib/i18n.svelte.js';
   import ServerSettings from './settings/Server.svelte';
+  import DomainsSettings from './settings/Domains.svelte';
   import Volumes from './settings/Volumes.svelte';
   import GitHubSettings from './settings/GitHub.svelte';
   import Account from './settings/Account.svelte';
@@ -11,7 +12,7 @@
   let section = $state('server');
   route.subscribe((r) => (section = r.segments[1] ?? 'server'));
 
-  const tabs = ['server', 'volumes', 'github', 'account'];
+  const tabs = ['server', 'domains', 'volumes', 'github', 'account'];
 </script>
 
 <h1>{t('settings.title')}</h1>
@@ -22,7 +23,9 @@
   {/each}
 </nav>
 
-{#if section === 'volumes'}
+{#if section === 'domains'}
+  <DomainsSettings {revision} />
+{:else if section === 'volumes'}
   <Volumes {revision} />
 {:else if section === 'github'}
   <GitHubSettings {revision} />

@@ -20,10 +20,12 @@
     flex-direction: column;
     align-items: center;
     gap: 6px;
-    padding: 44px 24px;
+    padding: 30px 24px;
     text-align: center;
   }
 
-  .empty p { max-width: 42ch; line-height: 1.55; }
+  /* Wide enough that a two-sentence description does not wrap into a
+     narrow column of four short lines. */
+  .empty p { max-width: 56ch; line-height: 1.55; }
   .actions { margin-top: 10px; }
 </style>

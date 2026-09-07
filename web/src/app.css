@@ -254,6 +254,65 @@ textarea {
   white-space: nowrap;
 }
 
+/*
+ * A dense table for lists that are managed rather than read: one row per
+ * thing, actions on the right.
+ *
+ * It lives here rather than in a component because several screens need the
+ * same table and per-screen copies would drift apart. Pair it with Card's
+ * `flush`, so the rows reach the card's edges and read as one surface.
+ */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th {
+  padding: 9px 16px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+.table tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+/* Actions hug the right edge and never wrap onto a second line, so every
+   row stays the same height however long the values in it are. */
+.table td.actions,
+.table th.actions {
+  text-align: right;
+  white-space: nowrap;
+  width: 1%;
+}
+
+.table .actions :global(.btn) + :global(.btn) {
+  margin-left: 4px;
+}
+
+/* A table is the one thing on these screens allowed to scroll sideways;
+   the alternative is truncating a hostname to the point of uselessness. */
+.table-scroll {
+  overflow-x: auto;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

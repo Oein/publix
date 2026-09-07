@@ -23,6 +23,10 @@ func TestValidateVolumeRejectsDangerousPaths(t *testing.T) {
 	for _, path := range []string{
 		"/", "/etc", "/usr", "/var/run", "/root", "/proc", "/sys", "/dev",
 		"relative/path", "/mnt/../etc",
+		// Everything *inside* a protected directory is protected too. Only
+		// exact matches were refused before, so /etc/ssh sailed through.
+		"/etc/ssh", "/root/.ssh", "/var/run/docker", "/usr/local/share",
+		"/var/lib/docker/volumes",
 	} {
 		err := s.ValidateVolume(Volume{Name: "disk0", Path: path, Scope: ScopeProject}, "")
 		if err == nil {
@@ -30,8 +34,85 @@ func TestValidateVolumeRejectsDangerousPaths(t *testing.T) {
 		}
 	}
 
-	if err := s.ValidateVolume(Volume{Name: "disk0", Path: "/mnt/data", Scope: ScopeProject}, ""); err != nil {
-		t.Errorf("a normal path was rejected: %v", err)
+	for _, path := range []string{"/mnt/data", "/srv/uploads", "/opt/publix-data", "/home/deploy/data"} {
+		if err := s.ValidateVolume(Volume{Name: "disk0", Path: path, Scope: ScopeProject}, ""); err != nil {
+			t.Errorf("a normal path %q was rejected: %v", path, err)
+		}
+	}
+}
+
+// publix's own state holds every project's secrets and the GitHub
+// credentials, and the Traefik file decides what each hostname reaches. A
+// project able to write either would own the platform.
+func TestValidateVolumeProtectsPublixsOwnState(t *testing.T) {
+	t.Setenv("PUBLIX_HOME", "/var/lib/publix")
+	s := &Settings{
+		WorkDir:           "/var/lib/publix/work",
+		TraefikDynamicDir: "/etc/traefik/dynamic",
+	}
+	for _, path := range []string{
+		"/var/lib/publix",
+		"/var/lib/publix/work",
+		"/var/lib/publix/logs",
+		"/etc/traefik/dynamic",
+	} {
+		if err := s.ValidateVolume(Volume{Name: "d", Path: path, Scope: ScopeProject}, ""); err == nil {
+			t.Errorf("path %q should have been rejected", path)
+		}
+	}
+}
+
+// A shared volume containing a project volume's root lets every project
+// read every other project's directory, which is exactly what the scopes
+// promise it cannot.
+func TestValidateVolumeRejectsNesting(t *testing.T) {
+	s := &Settings{Volumes: []Volume{{Name: "outer", Path: "/mnt/data", Scope: ScopeShared}}}
+
+	for _, path := range []string{"/mnt/data", "/mnt/data/inner", "/mnt"} {
+		if err := s.ValidateVolume(Volume{Name: "inner", Path: path, Scope: ScopeProject}, ""); err == nil {
+			t.Errorf("path %q overlaps /mnt/data and should have been rejected", path)
+		}
+	}
+	if err := s.ValidateVolume(Volume{Name: "inner", Path: "/mnt/other", Scope: ScopeProject}, ""); err != nil {
+		t.Errorf("a sibling path was rejected: %v", err)
+	}
+	// Editing a volume in place must not collide with itself.
+	if err := s.ValidateVolume(Volume{Name: "outer", Path: "/mnt/data", Scope: ScopeShared}, "outer"); err != nil {
+		t.Errorf("editing a volume in place was rejected: %v", err)
+	}
+}
+
+// A symlink into a protected directory is still that directory, and
+// checking only the name someone typed would miss it.
+func TestValidateVolumeFollowsSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	link := filepath.Join(dir, "innocent")
+	if err := os.Symlink("/etc", link); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+
+	err := (&Settings{}).ValidateVolume(Volume{Name: "d", Path: link, Scope: ScopeProject}, "")
+	if err == nil {
+		t.Fatal("a symlink to /etc was accepted")
+	}
+	if !strings.Contains(err.Error(), "/etc") {
+		t.Errorf("the error does not say where it actually points: %v", err)
+	}
+}
+
+func TestValidateVolumeChecksMountAndScope(t *testing.T) {
+	s := &Settings{}
+	bad := map[string]Volume{
+		"relative mount": {Name: "d", Path: "/mnt/d", Scope: ScopeProject, DefaultMount: "shared/d"},
+		"mount over /":   {Name: "d", Path: "/mnt/d", Scope: ScopeProject, DefaultMount: "/"},
+		"unknown scope":  {Name: "d", Path: "/mnt/d", Scope: VolumeScope("everyone")},
+		"bad name":       {Name: "Disk 0", Path: "/mnt/d", Scope: ScopeProject},
+		"no path":        {Name: "d", Scope: ScopeProject},
+	}
+	for name, v := range bad {
+		if err := s.ValidateVolume(v, ""); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
 	}
 }
 
@@ -313,5 +394,104 @@ func TestFreshStoreIsNormalised(t *testing.T) {
 	}
 	if reopened.Auth.SessionKey != set.Auth.SessionKey {
 		t.Error("the session key changed across a reopen; everyone would be signed out")
+	}
+}
+
+// A server used to have exactly one apps domain. Opening an older state
+// file has to carry it into the list, or every project's generated address
+// moves the moment publix is upgraded.
+func TestLegacyAppsDomainBecomesTheDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "publix.json")
+	if err := os.WriteFile(path, []byte(`{
+		"settings": {"appsDomain": "apps.example.com"},
+		"projects": [{"id":"abcd","slug":"blog","name":"blog"}]
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := OpenAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := s.Settings()
+
+	if got := set.DefaultAppsDomain(); got != "apps.example.com" {
+		t.Fatalf("default = %q, want apps.example.com", got)
+	}
+	if set.LegacyAppsDomain != "" {
+		t.Error("the legacy field should be emptied once migrated, so it cannot drift from the list")
+	}
+	if len(set.AppsDomains) != 1 || !set.AppsDomains[0].Default {
+		t.Fatalf("apps domains = %+v, want one marked default", set.AppsDomains)
+	}
+	if got := set.AppsDomainFor(s.Projects()[0]); got != "apps.example.com" {
+		t.Errorf("the existing project moved to %q", got)
+	}
+}
+
+func TestAppsDomainForResolvesAProjectsChoice(t *testing.T) {
+	set := &Settings{AppsDomains: []AppsDomain{
+		{Domain: "apps.example.com", Default: true},
+		{Domain: "staging.example.com"},
+	}}
+
+	cases := []struct {
+		name    string
+		chosen  string
+		want    string
+		because string
+	}{
+		{"unset takes the default", "", "apps.example.com", ""},
+		{"an explicit choice is honoured", "staging.example.com", "staging.example.com", ""},
+		{"the sentinel opts out entirely", AppsDomainNone, "", ""},
+		{
+			"an unregistered choice falls back", "gone.example.com", "apps.example.com",
+			"dropping the project off the internet is worse than moving it",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := set.AppsDomainFor(&Project{AppsDomain: c.chosen})
+			if got != c.want {
+				t.Errorf("got %q, want %q %s", got, c.want, c.because)
+			}
+		})
+	}
+}
+
+// With nothing marked default the answer would depend on registration
+// order, which is not a decision anyone made.
+func TestDefaultAppsDomainFallsBackToTheFirst(t *testing.T) {
+	set := &Settings{AppsDomains: []AppsDomain{{Domain: "a.example.com"}, {Domain: "b.example.com"}}}
+	if got := set.DefaultAppsDomain(); got != "a.example.com" {
+		t.Errorf("default = %q, want a.example.com", got)
+	}
+	if got := (&Settings{}).DefaultAppsDomain(); got != "" {
+		t.Errorf("with none registered, default = %q, want empty", got)
+	}
+}
+
+func TestNormaliseAppsDomain(t *testing.T) {
+	ok := map[string]string{
+		"apps.example.com":          "apps.example.com",
+		"  APPS.Example.COM  ":      "apps.example.com",
+		"*.apps.example.com":        "apps.example.com",
+		"https://apps.example.com/": "apps.example.com",
+		"apps.example.com.":         "apps.example.com",
+	}
+	for in, want := range ok {
+		got, err := NormaliseAppsDomain(in)
+		if err != nil {
+			t.Errorf("%q: %v", in, err)
+		} else if got != want {
+			t.Errorf("%q -> %q, want %q", in, got, want)
+		}
+	}
+
+	for _, bad := range []string{"", "example", "not a domain", "-bad.example.com", AppsDomainNone} {
+		if got, err := NormaliseAppsDomain(bad); err == nil {
+			t.Errorf("%q was accepted as %q", bad, got)
+		}
 	}
 }

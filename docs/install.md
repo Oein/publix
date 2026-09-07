@@ -57,7 +57,9 @@ duplicates.
 1. Installs `ca-certificates`, `curl` and `git`.
 2. Installs Docker from Docker's own apt repository, unless it is already
    there. Pass `--skip-docker` if you install it another way.
-3. Clones the repository to `/opt/publix`.
+3. Clones the repository to `/opt/publix`, or fetches the latest `main` into
+   it if it is already there. Run from inside a checkout instead, and it
+   installs that checkout without fetching — see [Upgrading](#upgrading).
 4. Creates `/var/lib/publix` (mode 0700 — it holds your GitHub token and
    every project's secrets) and `/etc/traefik/dynamic`.
 5. Creates the `publix` Docker network that Traefik and every project share.
@@ -81,13 +83,14 @@ duplicates.
 
 ## First run
 
-Open the dashboard and choose an admin password. Then, under
-**Settings → Server**, set two things:
+Open the dashboard and choose an admin password. Then set two things:
 
-- **Apps domain** — `apps.example.com`. Every project gets
-  `<project>.apps.example.com` for free.
-- **Public URL** — `https://publix.example.com`. GitHub webhooks are sent
-  here, so deploy-on-push does not work without it.
+- **Settings → Domains** — register `apps.example.com` as an apps domain.
+  Every project then gets `<project>.apps.example.com` for free. A server
+  can have several, and each project picks which one it sits under; the same
+  page also forwards hostnames that have nothing deployed behind them.
+- **Settings → Server** — **Public URL**, `https://publix.example.com`.
+  GitHub webhooks are sent here, so deploy-on-push does not work without it.
 
 Then **Settings → GitHub** and connect either a personal access token
 (fastest) or a GitHub App (right for an organisation). Your repositories
@@ -119,7 +122,18 @@ Repository permissions:
 Then **Install** the App on the account or organisation whose repositories
 you want to deploy, and paste the App ID and the private key into
 Settings → GitHub. publix finds the installation itself when there is only
-one.
+one; with several, paste the installation ID too — the error names them.
+
+> **Creating the App is not enough — installing it is a separate step, and
+> so is choosing what it can see.** An App with no repositories granted
+> connects successfully and shows an empty Import screen. If you picked
+> “Only select repositories”, only those appear; and if your repositories
+> belong to an organisation, the App has to be installed on *that
+> organisation*, not on your personal account.
+>
+> Settings → GitHub names the account the App is installed on and whether
+> it was given all or only selected repositories, and links straight to the
+> installation's settings on GitHub where that is changed.
 
 Both the webhook URL and its secret are shown on that page, with a copy
 button, precisely because an App's webhook is configured on the App rather
@@ -263,11 +277,40 @@ down is corrected.
 
 ### Upgrading
 
-Re-run the installer. It fetches, rebuilds and restarts:
+Re-run the one-liner. Piped from curl it fetches the latest `main` into
+`/opt/publix`, rebuilds the image and restarts:
 
 ```bash
-sudo /opt/publix/scripts/install.sh --email you@example.com
+curl -fsSL https://raw.githubusercontent.com/Oein/publix/main/scripts/install.sh \
+  | sudo bash -s -- --email you@example.com
 ```
+
+Or do it by hand, which is the same three steps:
+
+```bash
+cd /opt/publix
+sudo git pull
+sudo docker compose -f deploy/docker-compose.yml build --pull
+sudo docker compose -f deploy/docker-compose.yml up -d
+```
+
+Running `/opt/publix/scripts/install.sh` directly does **not** fetch. A
+script run from inside a checkout installs *that* checkout, so that testing
+a local change does not silently replace it with `main`. Use it when you
+have already pulled, or to try a branch:
+
+```bash
+cd /opt/publix
+sudo git fetch origin && sudo git checkout -B some-branch origin/some-branch
+sudo ./scripts/install.sh --email you@example.com
+```
+
+Your projects, settings and secrets live in `/var/lib/publix` and are
+untouched by an upgrade. Running containers keep serving while the new image
+builds; only publix itself restarts, and on startup it rewrites Traefik's
+routing from its own state. The dashboard's HTML is served `no-cache` with
+fingerprinted assets, so a normal page load picks up the new build — no hard
+refresh needed.
 
 ### Backing up
 

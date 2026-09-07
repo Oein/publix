@@ -106,6 +106,12 @@ export const api = {
     update: (body) => put('/api/settings', body),
     addVolume: (body) => post('/api/volumes', body),
     removeVolume: (name) => del(`/api/volumes/${encodeURIComponent(name)}`),
+    addAppsDomain: (body) => post('/api/apps-domains', body),
+    defaultAppsDomain: (domain) => post(`/api/apps-domains/${encodeURIComponent(domain)}/default`),
+    removeAppsDomain: (domain) => del(`/api/apps-domains/${encodeURIComponent(domain)}`),
+    addRedirect: (body) => post('/api/redirects', body),
+    updateRedirect: (domain, body) => put(`/api/redirects/${encodeURIComponent(domain)}`, body),
+    removeRedirect: (domain) => del(`/api/redirects/${encodeURIComponent(domain)}`),
   },
 
   system: () => get('/api/system'),

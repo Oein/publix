@@ -72,20 +72,23 @@ type Viewer struct {
 
 // Whoami identifies the credentials in use, which is what the settings page
 // shows to confirm a connection actually works.
+//
+// An App installation has no user, so it reports the account the App is
+// installed on. Naming that account is the whole point of the field here:
+// installing an App on your personal account when the repositories live in
+// an organisation is the most common way to end up connected and still see
+// nothing.
 func (c *Client) Whoami(ctx context.Context) (*Viewer, error) {
-	// An App installation has no user, so ask about the installation itself.
-	if _, ok := c.auth.(*appAuth); ok {
-		var inst struct {
-			Account struct {
-				Login     string `json:"login"`
-				AvatarURL string `json:"avatar_url"`
-				Type      string `json:"type"`
-			} `json:"account"`
-		}
-		if _, err := c.do(ctx, http.MethodGet, "/installation/repositories?per_page=1", nil, &struct{}{}); err != nil {
+	if inst, isApp, err := c.CurrentInstallation(ctx); isApp {
+		if err != nil {
 			return nil, err
 		}
-		return &Viewer{Login: inst.Account.Login, AvatarURL: inst.Account.AvatarURL, Type: "Installation"}, nil
+		return &Viewer{
+			Login:     inst.Account.Login,
+			Name:      inst.Account.Login,
+			AvatarURL: inst.Account.AvatarURL,
+			Type:      "Installation",
+		}, nil
 	}
 	var v Viewer
 	if _, err := c.do(ctx, http.MethodGet, "/user", nil, &v); err != nil {

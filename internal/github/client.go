@@ -107,11 +107,9 @@ func (a *appAuth) token(ctx context.Context, c *Client) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	installation := a.installationID
-	if installation == "" {
-		if installation, err = a.discoverInstallation(ctx, c, jwt); err != nil {
-			return "", err
-		}
+	installation, err := a.resolve(ctx, c, jwt)
+	if err != nil {
+		return "", err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -139,6 +137,24 @@ func (a *appAuth) token(ctx context.Context, c *Client) (string, error) {
 	}
 	a.cached, a.expires = out.Token, out.ExpiresAt
 	return a.cached, nil
+}
+
+// resolve returns the installation to act as, discovering it when the
+// operator did not paste one. The result is remembered: it cannot change
+// for a given App ID, and re-listing installations on every token refresh
+// spends a request for nothing.
+//
+// The caller must hold a.mu, since this writes the remembered value.
+func (a *appAuth) resolve(ctx context.Context, c *Client, jwt string) (string, error) {
+	if a.installationID != "" {
+		return a.installationID, nil
+	}
+	found, err := a.discoverInstallation(ctx, c, jwt)
+	if err != nil {
+		return "", err
+	}
+	a.installationID = found
+	return found, nil
 }
 
 // discoverInstallation finds the App's single installation, so an operator
@@ -240,6 +256,70 @@ func parsePrivateKey(pemData string) (*rsa.PrivateKey, error) {
 		return nil, fmt.Errorf("the GitHub App private key must be an RSA key, got %T", parsed)
 	}
 	return key, nil
+}
+
+// Installation describes one installation of the App: which account it is
+// on, and how much of that account it was given.
+type Installation struct {
+	ID      int64 `json:"id"`
+	Account struct {
+		Login     string `json:"login"`
+		AvatarURL string `json:"avatar_url"`
+		Type      string `json:"type"`
+	} `json:"account"`
+	// RepositorySelection is "all" or "selected". The second is the usual
+	// reason an operator connects an App successfully and then sees an
+	// empty repository list.
+	RepositorySelection string `json:"repository_selection"`
+	// HTMLURL is the installation's own settings page, which is where the
+	// repository selection is changed.
+	HTMLURL string `json:"html_url"`
+}
+
+// CurrentInstallation describes the installation publix is acting as. The
+// second result is false under a personal access token, where there is no
+// installation to describe.
+//
+// Like App, this needs the App JWT: an installation token cannot read the
+// object that granted it.
+func (c *Client) CurrentInstallation(ctx context.Context) (*Installation, bool, error) {
+	a, ok := c.auth.(*appAuth)
+	if !ok {
+		return nil, false, nil
+	}
+	jwt, err := a.appJWT()
+	if err != nil {
+		return nil, true, err
+	}
+	a.mu.Lock()
+	id, err := a.resolve(ctx, c, jwt)
+	a.mu.Unlock()
+	if err != nil {
+		return nil, true, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		fmt.Sprintf("%s/app/installations/%s", c.base, url.PathEscape(id)), nil)
+	if err != nil {
+		return nil, true, err
+	}
+	req.Header.Set("Authorization", "Bearer "+jwt)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "publix")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, true, fmt.Errorf("calling GitHub: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, true, apiError(resp, "GET /app/installations/"+id)
+	}
+	var out Installation
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, true, err
+	}
+	return &out, true, nil
 }
 
 // do performs an authenticated API request.
