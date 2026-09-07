@@ -429,3 +429,136 @@ func TestRenderedFileAlwaysCarriesContent(t *testing.T) {
 		t.Errorf("wrote an empty http section, which disables Traefik's whole file provider:\n%s", raw)
 	}
 }
+
+func proxyRouterFor(t *testing.T, d *Dynamic, host string) (*Router, *Service) {
+	t.Helper()
+	for _, r := range d.HTTP.Routers {
+		if strings.Contains(r.Rule, "`"+host+"`") {
+			return r, d.HTTP.Services[r.Service]
+		}
+	}
+	t.Fatalf("no router for %s; routers were %v", host, d.HTTP.Routers)
+	return nil, nil
+}
+
+// The whole point of a proxy rather than a redirect: the request reaches
+// the backend, so the visitor's address bar keeps the hostname they typed.
+func TestProxyServesAnExternalBackend(t *testing.T) {
+	set := settings()
+	set.Proxies = []store.Proxy{{Domain: "nas.example.com", Target: "http://10.0.0.5:8080"}}
+
+	r, svc := proxyRouterFor(t, Build(set, nil), "nas.example.com")
+	if len(r.Middlewares) != 0 {
+		t.Errorf("a plain proxy needs no middleware, got %v", r.Middlewares)
+	}
+	if svc == nil || svc.LoadBalancer == nil || len(svc.LoadBalancer.Servers) != 1 {
+		t.Fatalf("no backend behind the router: %+v", svc)
+	}
+	if got := svc.LoadBalancer.Servers[0].URL; got != "http://10.0.0.5:8080" {
+		t.Errorf("backend = %q", got)
+	}
+	if svc.LoadBalancer.PassHostHeader != nil {
+		t.Error("passHostHeader was emitted even though the default is what we want")
+	}
+	if r.TLS == nil {
+		t.Error("no TLS, so the hostname would have no certificate")
+	}
+}
+
+// A bare host:port is what people type; it has to mean http, not nothing.
+func TestProxyTargetGainsAScheme(t *testing.T) {
+	set := settings()
+	set.Proxies = []store.Proxy{{Domain: "app.example.com", Target: "10.0.0.5:3000"}}
+
+	_, svc := proxyRouterFor(t, Build(set, nil), "app.example.com")
+	if got := svc.LoadBalancer.Servers[0].URL; got != "http://10.0.0.5:3000" {
+		t.Errorf("backend = %q, want an http:// URL", got)
+	}
+}
+
+func TestProxyOptionsReachTraefik(t *testing.T) {
+	pass := false
+	set := settings()
+	set.Proxies = []store.Proxy{{
+		Domain: "app.example.com", Path: "/api", Target: "https://10.0.0.5:8443",
+		StripPath: true, PassHostHeader: &pass, InsecureSkipVerify: true,
+	}}
+
+	d := Build(set, nil)
+	r, svc := proxyRouterFor(t, d, "app.example.com")
+
+	if !strings.Contains(r.Rule, "PathPrefix(`/api`)") {
+		t.Errorf("rule = %q, want the path prefix", r.Rule)
+	}
+	if len(r.Middlewares) != 1 {
+		t.Fatalf("stripPath was requested but no middleware attached: %v", r.Middlewares)
+	}
+	mw := d.HTTP.Middlewares[r.Middlewares[0]]
+	if mw.StripPrefix == nil || len(mw.StripPrefix.Prefixes) != 1 || mw.StripPrefix.Prefixes[0] != "/api" {
+		t.Errorf("middleware strips %+v, want /api", mw.StripPrefix)
+	}
+	if svc.LoadBalancer.PassHostHeader == nil || *svc.LoadBalancer.PassHostHeader {
+		t.Error("passHostHeader off was requested and lost — a pointer is what keeps false meaningful")
+	}
+	transport := d.HTTP.ServersTransports[svc.LoadBalancer.ServersTransport]
+	if transport == nil || !transport.InsecureSkipVerify {
+		t.Errorf("insecureSkipVerify was requested but no transport carries it: %+v", d.HTTP.ServersTransports)
+	}
+}
+
+// The same precedence rule as redirects: a hostname a project serves is
+// never taken over.
+func TestProjectRoutesWinOverProxies(t *testing.T) {
+	set := settings()
+	set.Proxies = []store.Proxy{{Domain: "app.example.com", Target: "http://10.0.0.5:8080"}}
+
+	d := Build(set, []Live{{
+		Project: project("app", "app.example.com"), Spec: spec(t, "port: 8080\n"), Deployment: "dep1",
+	}})
+
+	if _, ok := d.HTTP.Services["publix-px-0"]; ok {
+		t.Error("the proxy backend was emitted for a hostname the project serves")
+	}
+	r, _ := proxyRouterFor(t, d, "app.example.com")
+	if !strings.Contains(r.Service, "@docker") {
+		t.Errorf("the hostname routes to %q, not the project's deployment", r.Service)
+	}
+}
+
+func TestProxyValidation(t *testing.T) {
+	set := &store.Settings{
+		Proxies:   []store.Proxy{{Domain: "taken.example.com", Target: "http://10.0.0.5:80"}},
+		Redirects: []store.Redirect{{Domain: "moved.example.com", Target: "elsewhere.example.com"}},
+	}
+
+	bad := map[string]store.Proxy{
+		"no domain":          {Target: "http://10.0.0.5:80"},
+		"no target":          {Domain: "a.example.com"},
+		"not a host":         {Domain: "not a host", Target: "http://10.0.0.5:80"},
+		"self loop":          {Domain: "a.example.com", Target: "http://a.example.com:80"},
+		"duplicate":          {Domain: "taken.example.com", Target: "http://10.0.0.6:80"},
+		"relative path":      {Domain: "c.example.com", Path: "api", Target: "http://10.0.0.5:80"},
+		"strip nothing":      {Domain: "d.example.com", Target: "http://10.0.0.5:80", StripPath: true},
+		"already a redirect": {Domain: "moved.example.com", Target: "http://10.0.0.5:80"},
+	}
+	for name, p := range bad {
+		if err := set.ValidateProxy(p, ""); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+	if err := set.ValidateProxy(store.Proxy{Domain: "ok.example.com", Target: "10.0.0.5:3000"}, ""); err != nil {
+		t.Errorf("a valid proxy was rejected: %v", err)
+	}
+	if err := set.ValidateProxy(store.Proxy{Domain: "taken.example.com", Target: "http://10.0.0.9:80"}, "taken.example.com"); err != nil {
+		t.Errorf("editing a proxy in place was rejected: %v", err)
+	}
+}
+
+// One hostname cannot both proxy and redirect; whichever Traefik picked
+// would be arbitrary.
+func TestRedirectRefusesAProxiedHostname(t *testing.T) {
+	set := &store.Settings{Proxies: []store.Proxy{{Domain: "a.example.com", Target: "http://10.0.0.5:80"}}}
+	if err := set.ValidateRedirect(store.Redirect{Domain: "a.example.com", Target: "b.example.com"}, ""); err == nil {
+		t.Error("a redirect was accepted for a hostname that is already proxied")
+	}
+}

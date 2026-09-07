@@ -25,6 +25,7 @@ type settingsView struct {
 	EntryPoints       []string         `json:"entryPoints"`
 	CertResolver      string           `json:"certResolver"`
 	AppsDomains       []appsDomainView `json:"appsDomains"`
+	Proxies           []proxyView      `json:"proxies"`
 	Redirects         []redirectView   `json:"redirects"`
 	PublicURL         string           `json:"publicUrl"`
 	WorkDir           string           `json:"workDir"`
@@ -42,6 +43,18 @@ type appsDomainView struct {
 	// what a parent domain is for than the domain alone does.
 	Example string   `json:"example"`
 	UsedBy  []string `json:"usedBy"`
+}
+
+// proxyView annotates a proxy rule with what it resolves to and whether
+// anything is standing in its way.
+type proxyView struct {
+	store.Proxy
+	// Target is the absolute URL requests are proxied to, which is not
+	// what was typed when a bare host:port was given.
+	Target string `json:"resolvedTarget"`
+	// Shadowed names the project serving this hostname, if one does. Such
+	// a rule is stored but never emitted: the project wins.
+	Shadowed string `json:"shadowedBy,omitempty"`
 }
 
 // redirectView annotates a forwarding rule with what it resolves to and
@@ -79,6 +92,7 @@ func (s *Server) settingsView() settingsView {
 		EntryPoints:       set.EntryPoints,
 		CertResolver:      set.CertResolver,
 		AppsDomains:       []appsDomainView{},
+		Proxies:           []proxyView{},
 		Redirects:         []redirectView{},
 		PublicURL:         set.PublicURL,
 		WorkDir:           set.WorkDir,
@@ -100,6 +114,16 @@ func (s *Server) settingsView() settingsView {
 			}
 		}
 		v.AppsDomains = append(v.AppsDomains, view)
+	}
+	for _, px := range set.Proxies {
+		view := proxyView{Proxy: px, Target: px.TargetURL()}
+		for _, p := range projects {
+			if s.projectServes(&set, p, px.Domain) {
+				view.Shadowed = p.Name
+				break
+			}
+		}
+		v.Proxies = append(v.Proxies, view)
 	}
 	for _, rd := range set.Redirects {
 		view := redirectView{Redirect: rd, Target: rd.TargetURL()}
@@ -270,6 +294,14 @@ func (s *Server) handleAddVolume(w http.ResponseWriter, r *http.Request) {
 	set := s.store.Settings()
 	if err := set.ValidateVolume(v, ""); err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	// A container install can only see host paths that were mounted into
+	// it. Say that, rather than "does not exist" — and never offer to
+	// create the directory, which would make it inside the container.
+	if hint := containerPathHint(v.Path); hint != "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("%s", hint))
 		return
 	}
 
@@ -656,6 +688,132 @@ func (s *Server) handleDeleteRedirect(w http.ResponseWriter, r *http.Request) {
 			return fmt.Errorf("%s is not forwarded", domain)
 		}
 		set.Redirects = out
+		return nil
+	}); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.engine.ReconcileRouting(); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.settingsView())
+}
+
+// proxyBody is a proxy rule as the dashboard sends it.
+type proxyBody struct {
+	Domain             string `json:"domain"`
+	Path               string `json:"path"`
+	Target             string `json:"target"`
+	StripPath          bool   `json:"stripPath"`
+	PassHostHeader     *bool  `json:"passHostHeader"`
+	InsecureSkipVerify bool   `json:"insecureSkipVerify"`
+	Description        string `json:"description"`
+}
+
+func (b proxyBody) toProxy() store.Proxy {
+	path := strings.TrimSpace(b.Path)
+	if path == "/" {
+		path = ""
+	}
+	return store.Proxy{
+		Domain:             strings.ToLower(strings.Trim(strings.TrimSpace(b.Domain), ".")),
+		Path:               path,
+		Target:             strings.TrimSpace(b.Target),
+		StripPath:          b.StripPath,
+		PassHostHeader:     b.PassHostHeader,
+		InsecureSkipVerify: b.InsecureSkipVerify,
+		Description:        strings.TrimSpace(b.Description),
+	}
+}
+
+// handleAddProxy attaches a hostname to a backend publix does not deploy.
+func (s *Server) handleAddProxy(w http.ResponseWriter, r *http.Request) {
+	var body proxyBody
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	px := body.toProxy()
+
+	set := s.store.Settings()
+	for _, p := range s.store.Projects() {
+		if s.projectServes(&set, p, px.Domain) {
+			writeError(w, http.StatusConflict,
+				fmt.Errorf("%s is served by the project %q, so proxying it would never take effect", px.Domain, p.Name))
+			return
+		}
+	}
+
+	if err := s.store.SetSettings(func(set *store.Settings) error {
+		if err := set.ValidateProxy(px, ""); err != nil {
+			return err
+		}
+		set.Proxies = append(set.Proxies, px)
+		return nil
+	}); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.engine.ReconcileRouting(); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, s.settingsView())
+}
+
+// handleUpdateProxy replaces a rule in place, keyed by its hostname.
+func (s *Server) handleUpdateProxy(w http.ResponseWriter, r *http.Request) {
+	source := strings.ToLower(strings.TrimSpace(r.PathValue("domain")))
+	var body proxyBody
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	px := body.toProxy()
+	if px.Domain == "" {
+		px.Domain = source
+	}
+
+	if err := s.store.SetSettings(func(set *store.Settings) error {
+		if err := set.ValidateProxy(px, source); err != nil {
+			return err
+		}
+		for i, existing := range set.Proxies {
+			if strings.EqualFold(existing.Domain, source) {
+				set.Proxies[i] = px
+				return nil
+			}
+		}
+		return fmt.Errorf("%s is not proxied", source)
+	}); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.engine.ReconcileRouting(); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.settingsView())
+}
+
+// handleDeleteProxy removes a proxy rule.
+func (s *Server) handleDeleteProxy(w http.ResponseWriter, r *http.Request) {
+	domain := strings.ToLower(strings.TrimSpace(r.PathValue("domain")))
+	if err := s.store.SetSettings(func(set *store.Settings) error {
+		out := set.Proxies[:0]
+		found := false
+		for _, px := range set.Proxies {
+			if strings.EqualFold(px.Domain, domain) {
+				found = true
+				continue
+			}
+			out = append(out, px)
+		}
+		if !found {
+			return fmt.Errorf("%s is not proxied", domain)
+		}
+		set.Proxies = out
 		return nil
 	}); err != nil {
 		writeError(w, http.StatusBadRequest, err)
