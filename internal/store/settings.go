@@ -7,6 +7,7 @@ package store
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -44,6 +45,11 @@ type Settings struct {
 	// could be several. It is migrated into AppsDomains on load and then
 	// left empty; the field remains only so an older state file opens.
 	LegacyAppsDomain string `json:"appsDomain,omitempty"`
+
+	// Proxies attach a hostname to a backend publix does not deploy: an
+	// app on another host, a container someone else runs, a device on the
+	// LAN. Traefik proxies to it, so the address in the browser stays.
+	Proxies []Proxy `json:"proxies,omitempty"`
 
 	// Redirects forward hostnames that have no project behind them —
 	// a retired domain, a www that should reach the apex, a vanity name
@@ -131,6 +137,51 @@ type AppsDomain struct {
 // It cannot collide with a real registration: every apps domain must
 // contain a dot, and this does not.
 const AppsDomainNone = "none"
+
+// Proxy routes a hostname to a backend publix does not manage.
+//
+// This is the opposite of a Redirect: the request is proxied, so the
+// visitor's address bar keeps the hostname they typed and the backend can
+// be anything reachable from the Traefik container — another machine, a
+// container from a different compose project, a box on the LAN.
+//
+// It exists because a server that terminates TLS for a domain is the
+// natural place to put everything on that domain, deployed here or not.
+type Proxy struct {
+	// Domain is the hostname visitors arrive on.
+	Domain string `json:"domain"`
+	// Path narrows the rule to a prefix. Empty proxies the whole host.
+	Path string `json:"path,omitempty"`
+	// Target is the backend, as an absolute URL: http://10.0.0.5:3000.
+	Target string `json:"target"`
+	// StripPath removes Path before proxying, for a backend mounted at its
+	// own root rather than under the prefix.
+	StripPath bool `json:"stripPath,omitempty"`
+	// PassHostHeader forwards the visitor's Host to the backend. It
+	// defaults to true, which is what a self-hosted app expects; turn it
+	// off for a backend that routes on its own hostname and would
+	// otherwise not recognise the request.
+	PassHostHeader *bool `json:"passHostHeader,omitempty"`
+	// InsecureSkipVerify accepts a backend HTTPS certificate that does not
+	// validate. Only for a backend on your own network with a self-signed
+	// certificate.
+	InsecureSkipVerify bool `json:"insecureSkipVerify,omitempty"`
+	// Description is shown in the dashboard.
+	Description string `json:"description,omitempty"`
+}
+
+// PassesHost reports whether the visitor's Host reaches the backend.
+func (p Proxy) PassesHost() bool { return p.PassHostHeader == nil || *p.PassHostHeader }
+
+// TargetURL is the backend as an absolute URL. A bare host:port becomes
+// http, since a backend given without a scheme is almost never TLS.
+func (p Proxy) TargetURL() string {
+	t := strings.TrimSuffix(strings.TrimSpace(p.Target), "/")
+	if strings.HasPrefix(t, "http://") || strings.HasPrefix(t, "https://") {
+		return t
+	}
+	return "http://" + t
+}
 
 // Redirect forwards one hostname somewhere else, with nothing deployed
 // behind it.
@@ -325,6 +376,62 @@ func (s *Settings) AppsDomainFor(p *Project) string {
 	}
 }
 
+// Proxy looks up a registered proxy rule.
+func (s *Settings) Proxy(domain, path string) (Proxy, bool) {
+	for _, p := range s.Proxies {
+		if strings.EqualFold(p.Domain, domain) && p.Path == path {
+			return p, true
+		}
+	}
+	return Proxy{}, false
+}
+
+// ValidateProxy checks a proxy rule before it is saved.
+func (s *Settings) ValidateProxy(p Proxy, replacing string) error {
+	if p.Domain == "" {
+		return fmt.Errorf("a hostname is required")
+	}
+	if !hostnameRe.MatchString(p.Domain) {
+		return fmt.Errorf("%q is not a hostname", p.Domain)
+	}
+	if strings.TrimSpace(p.Target) == "" {
+		return fmt.Errorf("a target is required — where should %s go?", p.Domain)
+	}
+
+	u, err := url.Parse(p.TargetURL())
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("%q is not a URL publix can proxy to — it should look like http://10.0.0.5:3000", p.Target)
+	}
+	// Proxying a hostname to itself is a loop Traefik will happily serve
+	// until something times out.
+	if strings.EqualFold(u.Hostname(), p.Domain) {
+		return fmt.Errorf("%s would proxy to itself", p.Domain)
+	}
+	if p.Path != "" && !strings.HasPrefix(p.Path, "/") {
+		return fmt.Errorf("a path must start with /, got %q", p.Path)
+	}
+	if p.StripPath && p.Path == "" {
+		return fmt.Errorf("there is no path to strip — set a path prefix, or leave stripping off")
+	}
+
+	for _, existing := range s.Proxies {
+		if strings.EqualFold(existing.Domain, replacing) && existing.Path == p.Path {
+			continue
+		}
+		if strings.EqualFold(existing.Domain, p.Domain) && existing.Path == p.Path {
+			return fmt.Errorf("%s is already proxied", p.Domain)
+		}
+	}
+	// One hostname cannot both proxy and redirect: whichever Traefik picked
+	// would be arbitrary.
+	for _, r := range s.Redirects {
+		if strings.EqualFold(r.Domain, p.Domain) && r.Path == p.Path {
+			return fmt.Errorf("%s is already redirected to %s; remove that rule first", p.Domain, r.TargetURL())
+		}
+	}
+	return nil
+}
+
 // Redirect looks up a registered forwarding rule.
 func (s *Settings) Redirect(domain, path string) (Redirect, bool) {
 	for _, r := range s.Redirects {
@@ -363,7 +470,12 @@ func (s *Settings) ValidateRedirect(r Redirect, replacing string) error {
 			continue
 		}
 		if strings.EqualFold(existing.Domain, r.Domain) && existing.Path == r.Path {
-			return fmt.Errorf("%s is already forwarded", r.Domain)
+			return fmt.Errorf("%s is already redirected", r.Domain)
+		}
+	}
+	for _, p := range s.Proxies {
+		if strings.EqualFold(p.Domain, r.Domain) && p.Path == r.Path {
+			return fmt.Errorf("%s is already proxied to %s; remove that rule first", r.Domain, p.TargetURL())
 		}
 	}
 	return nil

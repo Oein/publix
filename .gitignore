@@ -18,3 +18,7 @@ node_modules/
 
 # Written by scripts/install.sh; holds the operator's ACME email.
 /deploy/.env
+
+# The operator's own compose additions. Tracked docker-compose.yml is
+# replaced on every upgrade, so anything local has to live outside it.
+/deploy/docker-compose.override.yml

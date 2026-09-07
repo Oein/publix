@@ -309,6 +309,35 @@ export default {
   'domainsPage.noAppsDesc':
     '없으면 프로젝트는 스스로 설정한 도메인으로만 접근할 수 있습니다. 와일드카드 상위 도메인을 등록하면 모든 프로젝트가 가져오는 즉시 동작하는 URL을 받습니다.',
 
+  'domainsPage.proxyTitle': '외부 앱 연결',
+  'domainsPage.proxyDesc':
+    'publix가 배포하지 않은 것이 서비스하는 호스트 이름입니다 — 다른 머신의 앱, 다른 스택의 컨테이너, LAN의 장비. 요청을 프록시하므로 방문자는 입력한 주소를 그대로 유지하고, TLS는 이 서버가 처리합니다.',
+  'domainsPage.addProxy': '앱 연결',
+  'domainsPage.addProxyTitle': '도메인을 앱에 연결',
+  'domainsPage.editProxyTitle': '연결 수정',
+  'domainsPage.backend': '백엔드',
+  'domainsPage.proxyDomainHint': '방문자가 도착하는 호스트 이름입니다. DNS를 이 서버로 향하게 하세요.',
+  'domainsPage.backendHint': '이 서버에서 닿을 수 있는 앱의 주소입니다. 스킴 없이 host:port 만 적으면 http로 봅니다.',
+  'domainsPage.proxyPathHint': '선택 사항입니다. 이 경로 아래의 요청만 백엔드로 보냅니다.',
+  'domainsPage.stripLabel': '프록시 전에 접두사 제거',
+  'domainsPage.stripHint': '백엔드가 이 경로 아래가 아니라 자기 루트에서 서비스할 때 켜세요.',
+  'domainsPage.stripped': '접두사 제거',
+  'domainsPage.passHostLabel': '방문자의 호스트 이름을 백엔드로 전달',
+  'domainsPage.passHostHint':
+    '자체 호스팅 앱이 기대하는 동작입니다. 백엔드가 자기 호스트 이름으로 라우팅해서 요청을 못 알아보는 경우에만 끄세요.',
+  'domainsPage.ownHost': '백엔드 호스트 이름',
+  'domainsPage.insecureLabel': '백엔드의 유효하지 않은 인증서 허용',
+  'domainsPage.insecureHint':
+    '자체 서명 인증서를 쓰는 내부망 HTTPS 백엔드에만 쓰세요. 해당 백엔드에 대한 검증을 끕니다.',
+  'domainsPage.insecure': '인증서 미검증',
+  'domainsPage.proxySaved': '{domain} 을(를) 연결했습니다',
+  'domainsPage.proxyRemoved': '{domain} 연결을 해제했습니다',
+  'domainsPage.removeProxyTitle': '{domain} 연결을 해제할까요?',
+  'domainsPage.removeProxyMessage':
+    '더 이상 {target} 로 가지 않으며, 다른 것이 이 이름을 가져갈 때까지 404를 응답합니다.',
+  'domainsPage.noProxiesTitle': '연결된 외부 앱이 없습니다',
+  'domainsPage.noProxiesDesc':
+    'publix 밖에서 도는 것에 호스트 이름을 붙이면 이 서버가 TLS를 처리하고 프록시합니다 — 그 앱은 인증서도, 공개 포트도 따로 필요 없습니다.',
   'domainsPage.forwardTitle': '전달(포워딩)',
   'domainsPage.forwardDesc':
     '뒤에 아무것도 배포되지 않은 채 방문자를 다른 곳으로 보내는 호스트 이름입니다. 다시 배포할 필요 없이 즉시 적용됩니다. 프로젝트가 실제로 서비스하는 호스트 이름은 여기서 가로챌 수 없습니다. 프로젝트가 우선하고 규칙에는 밀렸다는 표시가 붙습니다.',
@@ -367,6 +396,7 @@ export default {
 
   'server.status': '상태',
   'server.docker': 'Docker',
+  'server.publixVersion': 'publix',
   'server.unreachable': '연결 불가',
   'server.traefikConfig': 'Traefik 설정',
   'server.writable': '쓰기 가능',

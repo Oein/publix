@@ -317,6 +317,35 @@ export default {
   'domainsPage.noAppsDesc':
     'Without one, a project is only reachable on the domains it configures itself. Register a wildcard parent and every project gets a working URL the moment it is imported.',
 
+  'domainsPage.proxyTitle': 'External apps',
+  'domainsPage.proxyDesc':
+    'Hostnames served by something publix does not deploy — an app on another machine, a container from a different stack, a box on the LAN. The request is proxied, so the visitor keeps the hostname they typed and this server terminates TLS for it.',
+  'domainsPage.addProxy': 'Connect an app',
+  'domainsPage.addProxyTitle': 'Connect a domain to an app',
+  'domainsPage.editProxyTitle': 'Edit connection',
+  'domainsPage.backend': 'Backend',
+  'domainsPage.proxyDomainHint': 'The hostname visitors arrive on. Point its DNS at this server.',
+  'domainsPage.backendHint': 'Where the app answers, reachable from this server. A bare host:port means http.',
+  'domainsPage.proxyPathHint': 'Optional. Only send requests under this path to the backend.',
+  'domainsPage.stripLabel': 'Remove the prefix before proxying',
+  'domainsPage.stripHint': 'For a backend that serves at its own root rather than under this path.',
+  'domainsPage.stripped': 'Prefix stripped',
+  'domainsPage.passHostLabel': 'Send the visitor\u2019s hostname to the backend',
+  'domainsPage.passHostHint':
+    'What a self-hosted app expects. Turn it off for a backend that routes on its own hostname and would not recognise the request.',
+  'domainsPage.ownHost': 'Backend hostname',
+  'domainsPage.insecureLabel': 'Accept an invalid backend certificate',
+  'domainsPage.insecureHint':
+    'Only for an HTTPS backend on your own network with a self-signed certificate. It disables verification for that backend.',
+  'domainsPage.insecure': 'Unverified TLS',
+  'domainsPage.proxySaved': '{domain} is connected',
+  'domainsPage.proxyRemoved': '{domain} is no longer connected',
+  'domainsPage.removeProxyTitle': 'Disconnect {domain}?',
+  'domainsPage.removeProxyMessage':
+    'It will stop reaching {target}, and answer with a 404 until something else claims it.',
+  'domainsPage.noProxiesTitle': 'No external apps connected',
+  'domainsPage.noProxiesDesc':
+    'Point a hostname at something running outside publix and this server will terminate TLS and proxy to it — the app needs no certificate and no public port of its own.',
   'domainsPage.forwardTitle': 'Forwarding',
   'domainsPage.forwardDesc':
     'Hostnames that send visitors somewhere else, with nothing deployed behind them. Changes take effect immediately, with no redeploy. A hostname a project actually serves is never taken over here — the project wins, and the rule shows as overridden.',
@@ -377,6 +406,7 @@ export default {
 
   'server.status': 'Status',
   'server.docker': 'Docker',
+  'server.publixVersion': 'publix',
   'server.unreachable': 'unreachable',
   'server.traefikConfig': 'Traefik config',
   'server.writable': 'writable',

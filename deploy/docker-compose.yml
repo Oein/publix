@@ -32,6 +32,14 @@ services:
       - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
       - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
       - --log.level=INFO
+    environment:
+      # Traefik's docker provider asks for API 1.24, and Docker Engine 29
+      # raised its floor to 1.40 — so without this the provider dies in a
+      # retry loop, Traefik sees no containers at all, and every project
+      # router in publix.yml points at a service that never appears. The
+      # docker client reads this variable and skips its own negotiation,
+      # which is what fails against a daemon that refuses 1.24 outright.
+      DOCKER_API_VERSION: ${DOCKER_API_VERSION:-1.44}
     ports:
       - "80:80"
       - "443:443"
@@ -64,10 +72,10 @@ services:
       # Identical paths, per the rule above.
       - /var/lib/publix:/var/lib/publix
       - /etc/traefik/dynamic:/etc/traefik/dynamic
-      # Shared volumes you register in the dashboard must be mounted here
-      # too, at the same path, or the projects that ask for them will bind
-      # a directory that does not exist on the host:
-      # - /mnt/data:/mnt/data
+      # Volumes you register in the dashboard must be mounted here too, at
+      # the same path. Do not add them to this file: it is replaced on
+      # every upgrade. Copy docker-compose.override.yml.example to
+      # docker-compose.override.yml and put them there instead.
     environment:
       PUBLIX_HOME: /var/lib/publix
       PUBLIX_ADDR: 0.0.0.0:4321

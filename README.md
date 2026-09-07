@@ -258,6 +258,13 @@ you rename the project, so renaming can never orphan or expose its data. A
 shared volume has no isolation at all — that is what it is for, and why it
 is never the default.
 
+Running publix in a container adds one rule: a host path is only visible to
+publix if that exact path was mounted in. Registering `/mnt/data` without
+mounting it fails with an explanation and the compose line to add, rather
+than claiming the directory does not exist — and publix will not offer to
+create it, since the directory would be made inside the container and
+vanish on the next restart.
+
 Registration is checked before anything is written. publix refuses a host
 path that is, or sits inside, a system directory (`/etc`, `/usr`, `/root`,
 `/run`, `/var/lib/docker` and the rest), and refuses its own state, work and
@@ -374,6 +381,15 @@ Unregistering a parent never takes a project offline: projects that named it
 fall back to the default, and keep the setting so re-registering restores
 them.
 
+**External apps** attach a hostname to a backend publix does not deploy —
+an app on another machine, a container from a different stack, a box on the
+LAN. Traefik proxies to it, so the visitor keeps the hostname they typed and
+this server terminates TLS on the backend's behalf: the app needs no
+certificate and no public port of its own. A path prefix can send only part
+of a hostname there, optionally stripped before it reaches the backend, and
+the visitor's `Host` header is passed through unless you turn it off for a
+backend that routes on its own hostname.
+
 **Forwarding** sends a hostname somewhere else with nothing deployed behind
 it — a domain you no longer host, a `www` that should reach the apex, a
 vanity name pointing at a page. Each rule chooses whether the request path
@@ -381,9 +397,11 @@ carries across, and whether the redirect is permanent. It defaults to
 temporary: a browser caches a permanent redirect more or less forever, and
 the person adding one usually cannot yet tell whether it is right.
 
-Forwarding takes effect immediately, with no redeploy — routing is a file
-Traefik hot-reloads. A hostname a project actually serves is never taken
-over by a rule; the project wins, and the rule is shown as overridden.
+Both take effect immediately, with no redeploy — routing is a file Traefik
+hot-reloads. A hostname a project actually serves is never taken over by a
+rule; the project wins, and the rule is shown as overridden. One hostname
+cannot be both proxied and redirected, since whichever Traefik picked would
+be arbitrary.
 
 A project can also declare its own redirects in `deployment.yaml` (see
 [Routing](#routing)). Those belong to the repository and are versioned with

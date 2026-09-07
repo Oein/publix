@@ -27,6 +27,15 @@ type HTTPConfig struct {
 	Routers     map[string]*Router     `yaml:"routers,omitempty"`
 	Middlewares map[string]*Middleware `yaml:"middlewares,omitempty"`
 	Services    map[string]*Service    `yaml:"services,omitempty"`
+	// ServersTransports configure how Traefik reaches a backend. publix
+	// emits one only for a proxy that has to accept an untrusted backend
+	// certificate.
+	ServersTransports map[string]*ServersTransport `yaml:"serversTransports,omitempty"`
+}
+
+// ServersTransport is how Traefik connects to a backend.
+type ServersTransport struct {
+	InsecureSkipVerify bool `yaml:"insecureSkipVerify,omitempty"`
 }
 
 // Router is one Traefik router.
@@ -85,6 +94,11 @@ type Service struct {
 // LoadBalancer lists backend servers.
 type LoadBalancer struct {
 	Servers []Server `yaml:"servers"`
+	// PassHostHeader is a pointer so "false" survives: Traefik's own
+	// default is true, and omitting the field is not the same as setting
+	// it off.
+	PassHostHeader   *bool  `yaml:"passHostHeader,omitempty"`
+	ServersTransport string `yaml:"serversTransport,omitempty"`
 }
 
 // Server is one backend address.
@@ -109,9 +123,10 @@ type Live struct {
 // the reconciler write the file idempotently and diff it before writing.
 func Build(set *store.Settings, live []Live) *Dynamic {
 	d := &Dynamic{HTTP: HTTPConfig{
-		Routers:     map[string]*Router{},
-		Middlewares: map[string]*Middleware{},
-		Services:    map[string]*Service{},
+		Routers:           map[string]*Router{},
+		Middlewares:       map[string]*Middleware{},
+		Services:          map[string]*Service{},
+		ServersTransports: map[string]*ServersTransport{},
 	}}
 
 	sorted := append([]Live(nil), live...)
@@ -127,6 +142,7 @@ func Build(set *store.Settings, live []Live) *Dynamic {
 		buildProject(d, set, l)
 	}
 
+	buildProxies(d, set, claimed)
 	buildRedirects(d, set, claimed)
 
 	if len(d.HTTP.Middlewares) == 0 {
@@ -134,6 +150,9 @@ func Build(set *store.Settings, live []Live) *Dynamic {
 	}
 	if len(d.HTTP.Services) == 0 {
 		d.HTTP.Services = nil
+	}
+	if len(d.HTTP.ServersTransports) == 0 {
+		d.HTTP.ServersTransports = nil
 	}
 	return d
 }
@@ -172,6 +191,53 @@ func routeKey(domain, path string) string {
 	return strings.ToLower(domain) + "|" + path
 }
 
+// buildProxies attaches hostnames to backends publix does not deploy.
+//
+// Unlike a redirect, this is a real reverse proxy: a router and a service
+// pointing at an address, so the visitor's hostname is what stays in the
+// address bar and the backend can be anywhere Traefik can reach.
+func buildProxies(d *Dynamic, set *store.Settings, claimed map[string]bool) {
+	sorted := append([]store.Proxy(nil), set.Proxies...)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Domain != sorted[j].Domain {
+			return sorted[i].Domain < sorted[j].Domain
+		}
+		return sorted[i].Path < sorted[j].Path
+	})
+
+	for i, p := range sorted {
+		if claimed[routeKey(p.Domain, p.Path)] {
+			continue
+		}
+		name := fmt.Sprintf("publix-px-%d", i)
+
+		lb := &LoadBalancer{Servers: []Server{{URL: p.TargetURL()}}}
+		if !p.PassesHost() {
+			pass := false
+			lb.PassHostHeader = &pass
+		}
+		if p.InsecureSkipVerify {
+			transport := name + "-transport"
+			d.HTTP.ServersTransports[transport] = &ServersTransport{InsecureSkipVerify: true}
+			lb.ServersTransport = transport
+		}
+		d.HTTP.Services[name] = &Service{LoadBalancer: lb}
+
+		router := &Router{
+			Rule:        hostRule(p.Domain, p.Path),
+			EntryPoints: set.EntryPoints,
+			Service:     name,
+			TLS:         routerTLS(set, deployspec.Route{Domain: p.Domain}),
+		}
+		if p.StripPath && p.Path != "" {
+			mw := name + "-strip"
+			d.HTTP.Middlewares[mw] = &Middleware{StripPrefix: &StripPrefix{Prefixes: []string{p.Path}}}
+			router.Middlewares = []string{mw}
+		}
+		d.HTTP.Routers[name] = router
+	}
+}
+
 // buildRedirects emits the server's own forwarding rules: hostnames with
 // nothing deployed behind them.
 //
@@ -188,6 +254,12 @@ func buildRedirects(d *Dynamic, set *store.Settings, claimed map[string]bool) {
 
 	for i, r := range sorted {
 		if claimed[routeKey(r.Domain, r.Path)] {
+			continue
+		}
+		// A hostname that is proxied is served, not redirected. Validation
+		// refuses the combination, but a state file edited by hand could
+		// still carry both.
+		if _, proxied := set.Proxy(r.Domain, r.Path); proxied {
 			continue
 		}
 		name := fmt.Sprintf("publix-fw-%d", i)
@@ -368,18 +440,38 @@ func Path(set *store.Settings) string {
 	return filepath.Join(set.TraefikDynamicDir, DynamicFilename)
 }
 
+// Empty reports whether this configuration routes nothing at all.
+func (d *Dynamic) Empty() bool {
+	return len(d.HTTP.Routers) == 0 && len(d.HTTP.Services) == 0 && len(d.HTTP.Middlewares) == 0
+}
+
 // Write renders the configuration into Traefik's file provider directory.
 //
 // The write is atomic and is skipped entirely when nothing changed, so one
 // project's deploy never makes Traefik reload every route on the host.
+//
+// With nothing to route the file is removed rather than written empty. A
+// file whose http section has no content makes Traefik discard the entire
+// file-provider directory — including the hand-written router that serves
+// publix's own dashboard, which sits beside this one. So a server with no
+// live deployment would take its own dashboard offline, and the only clue
+// would be a 404 on a hostname whose router is plainly there on disk.
 func Write(set *store.Settings, d *Dynamic) error {
-	raw, err := d.Render()
-	if err != nil {
-		return err
-	}
 	path := Path(set)
 	if err := os.MkdirAll(set.TraefikDynamicDir, 0o755); err != nil {
 		return fmt.Errorf("cannot create the Traefik dynamic directory %s: %w\n\nPoint `traefikDynamicDir` at a directory publix can write to.", set.TraefikDynamicDir, err)
+	}
+
+	if d.Empty() {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("cannot remove %s: %w", path, err)
+		}
+		return nil
+	}
+
+	raw, err := d.Render()
+	if err != nil {
+		return err
 	}
 	if existing, err := os.ReadFile(path); err == nil && string(existing) == string(raw) {
 		return nil

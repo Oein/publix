@@ -249,7 +249,26 @@ fi
 
 step "Building publix (this takes a few minutes the first time)"
 cd "$INSTALL_DIR"
-if ! docker compose -f deploy/docker-compose.yml build --pull; then
+
+# An override file is how an operator adds anything of their own — the
+# extra volume mounts a registered volume needs, most often. It has to be a
+# separate file: this script updates the checkout with `git checkout
+# --force`, so an edit to the tracked compose file would be destroyed by
+# the next upgrade, taking those mounts with it.
+COMPOSE=(-f deploy/docker-compose.yml)
+if [ -f deploy/docker-compose.override.yml ]; then
+  COMPOSE+=(-f deploy/docker-compose.override.yml)
+  info "including deploy/docker-compose.override.yml"
+fi
+
+# Stamp the build with the commit it came from. Without this every
+# containerised build reports "docker", and an operator upgrading has no way
+# to tell whether the version they are looking at is the one they just
+# built. The dashboard shows this under Settings -> Server.
+PUBLIX_VERSION="$(git -C "$INSTALL_DIR" describe --tags --always --dirty 2>/dev/null || echo docker)"
+export PUBLIX_VERSION
+
+if ! docker compose "${COMPOSE[@]}" build --pull; then
   cat >&2 <<HINT
 
 ${RED} ✗${RESET} The publix image did not build.
@@ -263,7 +282,7 @@ HINT
 fi
 
 step "Starting Traefik and publix"
-docker compose -f deploy/docker-compose.yml up -d
+docker compose "${COMPOSE[@]}" up -d
 
 # Wait for the dashboard rather than declaring success and leaving the user
 # to discover a crash loop on their own.
@@ -279,13 +298,17 @@ done
 
 if [ "$ready" -ne 1 ]; then
   warn "publix did not answer within two minutes. Its logs:"
-  docker compose -f deploy/docker-compose.yml logs --tail 40 publix >&2
+  docker compose "${COMPOSE[@]}" logs --tail 40 publix >&2
   die "installation finished but publix is not healthy"
 fi
 
 # --- done --------------------------------------------------------------------
 
 printf '\n%s✓ publix is running%s\n\n' "$GREEN$BOLD" "$RESET"
+
+printf '  Version     %s%s%s\n' "$BOLD" "$PUBLIX_VERSION" "$RESET"
+printf '              %sshown under Settings → Server, so you can confirm an upgrade landed%s\n\n' \
+  "$DIM" "$RESET"
 
 if [ -n "$DASHBOARD_DOMAIN" ]; then
   printf '  Dashboard   %shttps://%s%s\n' "$BOLD" "$DASHBOARD_DOMAIN" "$RESET"

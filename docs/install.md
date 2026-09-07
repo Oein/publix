@@ -305,12 +305,47 @@ sudo git fetch origin && sudo git checkout -B some-branch origin/some-branch
 sudo ./scripts/install.sh --email you@example.com
 ```
 
+### Did the upgrade land?
+
+**Settings → Server** shows the commit publix is running, stamped into the
+image at build time. Compare it with what the checkout is on:
+
+```bash
+git -C /opt/publix log --oneline -1
+```
+
+If those disagree, the image was not rebuilt from the checkout. If they
+agree but the dashboard looks unchanged, the container is still the old
+one — `docker compose -f deploy/docker-compose.yml up -d` recreates it when
+the image changed, and `docker compose ps` shows when it last started.
+
 Your projects, settings and secrets live in `/var/lib/publix` and are
 untouched by an upgrade. Running containers keep serving while the new image
 builds; only publix itself restarts, and on startup it rewrites Traefik's
 routing from its own state. The dashboard's HTML is served `no-cache` with
 fingerprinted assets, so a normal page load picks up the new build — no hard
 refresh needed.
+
+### Adding your own compose settings
+
+Volumes you register in the dashboard have to be mounted into the publix
+container at the same path on both sides. Put those in
+`deploy/docker-compose.override.yml` — never in `docker-compose.yml`, which
+an upgrade replaces wholesale, taking your mounts with it.
+
+```bash
+cd /opt/publix
+sudo cp deploy/docker-compose.override.yml.example deploy/docker-compose.override.yml
+sudo nano deploy/docker-compose.override.yml
+```
+
+The installer includes it automatically when it exists. Running compose by
+hand, pass both files:
+
+```bash
+sudo docker compose -f deploy/docker-compose.yml \
+                    -f deploy/docker-compose.override.yml up -d
+```
 
 ### Backing up
 
@@ -333,6 +368,27 @@ sudo install -m 600 /var/lib/publix/publix.json /root/publix-backup.json
 ---
 
 ## When something is wrong
+
+**The dashboard answers 404 and `/etc/traefik/dynamic/publix.yml` is
+`http: {}`.** An older publix wrote that file even with nothing to route,
+and Traefik discards its whole file-provider directory over it — taking the
+dashboard's own router down with it. Upgrade, or just delete the file:
+publix now removes it instead of writing it empty.
+
+**Everything answers 404, and `docker compose logs traefik` repeats
+"client version 1.24 is too old".** Traefik's docker provider asks for
+Docker API 1.24; Docker Engine 29 raised its floor to 1.40. Traefik then
+sees no containers at all, so every project router points at a service that
+never appears. The compose file pins `DOCKER_API_VERSION` for the Traefik
+container to fix this; if you are on an older checkout, add it:
+
+```yaml
+  traefik:
+    environment:
+      DOCKER_API_VERSION: "1.44"
+```
+
+Then `docker compose -f deploy/docker-compose.yml up -d traefik`.
 
 **The installer stops on Docker's signing key.** The server cannot reach
 `download.docker.com`. Install Docker another way and re-run with

@@ -27,6 +27,18 @@
   let parentDescription = $state('');
   let removingParent = $state(null);
 
+  // Proxy rules. `editing` holds the rule's original domain, which is its
+  // key, so a rename edits in place rather than creating a second one.
+  let editingProxy = $state(null);
+  let pxDomain = $state('');
+  let pxPath = $state('');
+  let pxTarget = $state('');
+  let pxStripPath = $state(false);
+  let pxPassHost = $state(true);
+  let pxInsecure = $state(false);
+  let pxDescription = $state('');
+  let removingProxy = $state(null);
+
   // Forwarding rules. `editing` holds the rule's original domain, which is
   // its key, so a rename edits in place rather than creating a second one.
   let editingRule = $state(null);
@@ -102,6 +114,53 @@
     }
   }
 
+  function openProxy(rule) {
+    editingProxy = rule ?? { isNew: true };
+    pxDomain = rule?.domain ?? '';
+    pxPath = rule?.path ?? '';
+    pxTarget = rule?.target ?? '';
+    pxStripPath = rule?.stripPath ?? false;
+    pxPassHost = rule ? rule.passHostHeader !== false : true;
+    pxInsecure = rule?.insecureSkipVerify ?? false;
+    pxDescription = rule?.description ?? '';
+    formError = null;
+  }
+
+  async function saveProxy() {
+    const body = {
+      domain: pxDomain.trim(),
+      path: pxPath.trim(),
+      target: pxTarget.trim(),
+      stripPath: pxStripPath,
+      passHostHeader: pxPassHost,
+      insecureSkipVerify: pxInsecure,
+      description: pxDescription.trim(),
+    };
+    saving = true;
+    formError = null;
+    try {
+      settings = editingProxy.isNew
+        ? await api.settings.addProxy(body)
+        : await api.settings.updateProxy(editingProxy.domain, body);
+      notify.success(t('domainsPage.proxySaved', { domain: body.domain }));
+      editingProxy = null;
+    } catch (err) {
+      failed(err);
+    } finally {
+      saving = false;
+    }
+  }
+
+  async function removeProxy() {
+    try {
+      settings = await api.settings.removeProxy(removingProxy.domain);
+      notify.success(t('domainsPage.proxyRemoved', { domain: removingProxy.domain }));
+      removingProxy = null;
+    } catch (err) {
+      notify.error(err);
+    }
+  }
+
   function openRule(rule) {
     editingRule = rule ?? { isNew: true };
     ruleDomain = rule?.domain ?? '';
@@ -150,6 +209,15 @@
   // What the rule under construction will actually do, spelled out. A
   // redirect is the kind of thing people get backwards, and reading it
   // back in full is cheaper than finding out from a browser loop.
+  // What the backend URL actually becomes, since a bare host:port gains a
+  // scheme and a stripped prefix changes what the backend sees.
+  const proxyPreview = $derived.by(() => {
+    const to = pxTarget.trim() || '10.0.0.5:3000';
+    const base = /^https?:\/\//.test(to) ? to : `http://${to}`;
+    const tail = pxPath.trim() && !pxStripPath ? pxPath.trim() : '';
+    return base.replace(/\/$/, '') + tail;
+  });
+
   const rulePreview = $derived.by(() => {
     const from = ruleDomain.trim() || 'old.example.com';
     const to = ruleTarget.trim() || 'new.example.com';
@@ -212,6 +280,66 @@
                 {/if}
                 <Button size="sm" variant="danger" onclick={() => (removingParent = d)}>
                   {t('domainsPage.unregister')}
+                </Button>
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  {/if}
+</Card>
+
+<Card title={t('domainsPage.proxyTitle')} description={t('domainsPage.proxyDesc')} flush>
+  {#snippet actions()}
+    <Button size="sm" onclick={() => openProxy(null)}>{t('domainsPage.addProxy')}</Button>
+  {/snippet}
+
+  {#if settings === null}
+    <p class="pad muted small">{t('common.loading')}</p>
+  {:else if settings.proxies.length === 0}
+    <Empty title={t('domainsPage.noProxiesTitle')} description={t('domainsPage.noProxiesDesc')}>
+      <Button onclick={() => openProxy(null)}>{t('domainsPage.addProxy')}</Button>
+    </Empty>
+  {:else}
+    <div class="table-scroll">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>{t('domainsPage.domain')}</th>
+            <th>{t('domainsPage.backend')}</th>
+            <th>{t('domainsPage.colBehaviour')}</th>
+            <th class="actions"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each settings.proxies as rule (rule.domain + rule.path)}
+            <tr>
+              <td>
+                <code>{rule.domain}{rule.path}</code>
+                {#if rule.description}<div class="sub">{rule.description}</div>{/if}
+              </td>
+              <td><code class="target">{rule.resolvedTarget}</code></td>
+              <td>
+                <div class="cell">
+                  {#if rule.stripPath}<Badge tone="muted">{t('domainsPage.stripped')}</Badge>{/if}
+                  {#if rule.passHostHeader === false}
+                    <Badge tone="muted">{t('domainsPage.ownHost')}</Badge>
+                  {/if}
+                  {#if rule.insecureSkipVerify}
+                    <Badge tone="warn">{t('domainsPage.insecure')}</Badge>
+                  {/if}
+                  {#if rule.shadowedBy}
+                    <Badge tone="bad">{t('domainsPage.shadowed', { project: rule.shadowedBy })}</Badge>
+                  {/if}
+                </div>
+              </td>
+              <td class="actions">
+                <Button size="sm" variant="ghost" onclick={() => openProxy(rule)}>
+                  {t('domainsPage.edit')}
+                </Button>
+                <Button size="sm" variant="danger" onclick={() => (removingProxy = rule)}>
+                  {t('common.delete')}
                 </Button>
               </td>
             </tr>
@@ -331,6 +459,111 @@
       </Button>
     {/snippet}
   </Modal>
+{/if}
+
+{#if editingProxy}
+  <Modal
+    title={editingProxy.isNew ? t('domainsPage.addProxyTitle') : t('domainsPage.editProxyTitle')}
+    onclose={() => (editingProxy = null)}
+  >
+    <div class="form">
+      <div class="two">
+        <Field label={t('domainsPage.domain')} hint={t('domainsPage.proxyDomainHint')} required>
+          {#snippet children(id)}
+            <input
+              {id}
+              bind:value={pxDomain}
+              placeholder="app.example.com"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          {/snippet}
+        </Field>
+        <Field label={t('domainsPage.backend')} hint={t('domainsPage.backendHint')} required>
+          {#snippet children(id)}
+            <input
+              {id}
+              bind:value={pxTarget}
+              placeholder="10.0.0.5:3000"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          {/snippet}
+        </Field>
+      </div>
+
+      <Field label={t('domainsPage.pathPrefix')} hint={t('domainsPage.proxyPathHint')}>
+        {#snippet children(id)}
+          <input {id} bind:value={pxPath} placeholder="/api" autocomplete="off" />
+        {/snippet}
+      </Field>
+
+      {#if pxPath.trim()}
+        <label class="check">
+          <input type="checkbox" bind:checked={pxStripPath} />
+          <span>
+            <strong>{t('domainsPage.stripLabel')}</strong>
+            <span class="small muted">{t('domainsPage.stripHint')}</span>
+          </span>
+        </label>
+      {/if}
+
+      <label class="check">
+        <input type="checkbox" bind:checked={pxPassHost} />
+        <span>
+          <strong>{t('domainsPage.passHostLabel')}</strong>
+          <span class="small muted">{t('domainsPage.passHostHint')}</span>
+        </span>
+      </label>
+
+      <label class="check">
+        <input type="checkbox" bind:checked={pxInsecure} />
+        <span>
+          <strong>{t('domainsPage.insecureLabel')}</strong>
+          <span class="small muted">{t('domainsPage.insecureHint')}</span>
+        </span>
+      </label>
+
+      <Field label={t('vol.description')} hint={t('domainsPage.descriptionHint')}>
+        {#snippet children(id)}
+          <input {id} bind:value={pxDescription} autocomplete="off" />
+        {/snippet}
+      </Field>
+
+      {#if formError}{@render problem()}{/if}
+
+      {#if !formError}
+        <div class="preview small">
+          <code>https://{pxDomain.trim() || 'app.example.com'}{pxPath.trim()}</code>
+          <span class="arrow" aria-hidden="true">→</span>
+          <code>{proxyPreview}</code>
+        </div>
+      {/if}
+    </div>
+
+    {#snippet footer()}
+      <Button variant="ghost" onclick={() => (editingProxy = null)}>{t('common.cancel')}</Button>
+      <Button
+        variant="primary"
+        pending={saving}
+        disabled={!pxDomain.trim() || !pxTarget.trim()}
+        onclick={saveProxy}
+      >
+        {t('common.save')}
+      </Button>
+    {/snippet}
+  </Modal>
+{/if}
+
+{#if removingProxy}
+  <Confirm
+    title={t('domainsPage.removeProxyTitle', { domain: removingProxy.domain })}
+    message={t('domainsPage.removeProxyMessage', { target: removingProxy.resolvedTarget })}
+    confirmLabel={t('common.delete')}
+    danger
+    onconfirm={removeProxy}
+    onclose={() => (removingProxy = null)}
+  />
 {/if}
 
 {#if editingRule}
