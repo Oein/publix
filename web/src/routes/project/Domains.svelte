@@ -10,10 +10,49 @@
   let domains = $state([]);
   let draft = $state('');
   let saving = $state(false);
+  let appsDomains = $state([]);
+  let appsDomain = $state('');
+  let movingParent = $state(false);
 
   function reset() {
     domains = [...(project.domains ?? [])];
     draft = '';
+    appsDomain = project.appsDomain ?? '';
+  }
+
+  $effect(() => {
+    api.settings
+      .get()
+      .then((s) => (appsDomains = s.appsDomains ?? []))
+      .catch(() => (appsDomains = []));
+  });
+
+  const defaultAppsDomain = $derived(
+    appsDomains.find((d) => d.default)?.domain ?? appsDomains[0]?.domain ?? ''
+  );
+
+  const plannedHost = $derived.by(() => {
+    const parent = appsDomain === 'none' ? '' : appsDomain || defaultAppsDomain;
+    return parent ? `${project.slug}.${parent}` : '';
+  });
+
+  const parentChanged = $derived(appsDomain !== (project.appsDomain ?? ''));
+
+  async function moveParent() {
+    movingParent = true;
+    try {
+      await api.projects.update(project.id, { appsDomain });
+      notify.success(
+        plannedHost
+          ? t('domains.moved', { host: plannedHost })
+          : t('domains.movedNone')
+      );
+      onchange();
+    } catch (err) {
+      notify.error(err);
+    } finally {
+      movingParent = false;
+    }
   }
 
   $effect(() => {
@@ -24,12 +63,6 @@
 
   const changed = $derived(
     JSON.stringify(domains) !== JSON.stringify(project.domains ?? [])
-  );
-
-  // The hostname publix generates is not editable here — it is derived from
-  // the slug and the server's apps domain — so it is shown separately.
-  const generated = $derived(
-    (project.hosts ?? []).filter((h) => !domains.includes(h))
   );
 
   function add() {
@@ -101,20 +134,43 @@
   {/if}
 </Card>
 
-{#if generated.length > 0}
-  <Card title={t('domains.generatedTitle')}>
-    <ul>
-      {#each generated as host}
+<Card title={t('domains.generatedTitle')} description={t('domains.generatedDesc')}>
+  {#if appsDomains.length === 0}
+    <p class="muted small">{t('domains.noAppsDomains')}</p>
+    <a href="#/settings/domains"><Button size="sm">{t('domains.manageAppsDomains')}</Button></a>
+  {:else}
+    <div class="parent">
+      <select bind:value={appsDomain} aria-label={t('domains.appsDomain')}>
+        <option value="">{t('domains.appsDomainDefault', { domain: defaultAppsDomain })}</option>
+        {#each appsDomains as d}
+          {#if d.domain !== defaultAppsDomain}
+            <option value={d.domain}>{d.domain}</option>
+          {/if}
+        {/each}
+        <option value="none">{t('domains.appsDomainNone')}</option>
+      </select>
+      {#if parentChanged}
+        <Button variant="primary" pending={movingParent} onclick={moveParent}>
+          {t('common.save')}
+        </Button>
+        <Button variant="ghost" onclick={reset}>{t('common.discard')}</Button>
+      {/if}
+    </div>
+
+    {#if plannedHost}
+      <ul>
         <li>
-          <a href="https://{host}" target="_blank" rel="noreferrer noopener" class="mono">
-            {host} ↗
+          <a href="https://{plannedHost}" target="_blank" rel="noreferrer noopener" class="mono">
+            {plannedHost} ↗
           </a>
         </li>
-      {/each}
-    </ul>
+      </ul>
+    {:else}
+      <p class="muted small">{t('domains.noGeneratedHost')}</p>
+    {/if}
     <p class="muted small note">{t('domains.generatedNote')}</p>
-  </Card>
-{/if}
+  {/if}
+</Card>
 
 <Card title={t('domains.specTitle')}>
   <p class="muted small">{t('domains.specBlurb')}</p>
@@ -165,6 +221,31 @@ routes:
     border-radius: 4px;
   }
   .del:hover { color: var(--bad); background: var(--bad-bg); }
+
+  .parent {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  /* Field styles its own controls; this select sits outside one, so it
+     has to say the same thing itself. */
+  .parent select {
+    max-width: 340px;
+    flex: 1;
+    padding: 6px 9px;
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    color: var(--text);
+  }
+  .parent select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-bg);
+  }
 
   .save {
     display: flex;

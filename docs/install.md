@@ -83,13 +83,14 @@ duplicates.
 
 ## First run
 
-Open the dashboard and choose an admin password. Then, under
-**Settings → Server**, set two things:
+Open the dashboard and choose an admin password. Then set two things:
 
-- **Apps domain** — `apps.example.com`. Every project gets
-  `<project>.apps.example.com` for free.
-- **Public URL** — `https://publix.example.com`. GitHub webhooks are sent
-  here, so deploy-on-push does not work without it.
+- **Settings → Domains** — register `apps.example.com` as an apps domain.
+  Every project then gets `<project>.apps.example.com` for free. A server
+  can have several, and each project picks which one it sits under; the same
+  page also forwards hostnames that have nothing deployed behind them.
+- **Settings → Server** — **Public URL**, `https://publix.example.com`.
+  GitHub webhooks are sent here, so deploy-on-push does not work without it.
 
 Then **Settings → GitHub** and connect either a personal access token
 (fastest) or a GitHub App (right for an organisation). Your repositories

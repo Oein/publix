@@ -92,6 +92,7 @@ func (e *Engine) startContainers(ctx context.Context, dc *Context) ([]string, er
 		Branch:     dc.Deployment.Branch,
 		Kind:       string(sp.Kind),
 		Created:    time.Now().UTC().Format(time.RFC3339),
+		AppsDomain: dc.Settings.AppsDomainFor(dc.Project),
 	}
 
 	hostCfg, err := e.hostConfig(dc, binds)

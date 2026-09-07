@@ -117,9 +117,17 @@ func Build(set *store.Settings, live []Live) *Dynamic {
 	sorted := append([]Live(nil), live...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Project.Slug < sorted[j].Project.Slug })
 
+	// Projects first: a hostname a project actually serves is never taken
+	// over by a forwarding rule, whatever order they were configured in.
+	claimed := map[string]bool{}
 	for _, l := range sorted {
+		for _, r := range Hosts(set, l.Project, l.Spec) {
+			claimed[routeKey(r.Domain, r.Path)] = true
+		}
 		buildProject(d, set, l)
 	}
+
+	buildRedirects(d, set, claimed)
 
 	if len(d.HTTP.Middlewares) == 0 {
 		d.HTTP.Middlewares = nil
@@ -154,10 +162,69 @@ func Hosts(set *store.Settings, p *store.Project, sp *deployspec.Spec) []deploys
 	for _, dom := range p.Domains {
 		add(deployspec.Route{Domain: dom})
 	}
-	if h := ProjectHost(p.Slug, set.AppsDomain); h != "" {
+	if h := ProjectHost(p.Slug, set.AppsDomainFor(p)); h != "" {
 		add(deployspec.Route{Domain: h})
 	}
 	return routes
+}
+
+func routeKey(domain, path string) string {
+	return strings.ToLower(domain) + "|" + path
+}
+
+// buildRedirects emits the server's own forwarding rules: hostnames with
+// nothing deployed behind them.
+//
+// They need a service to reference even though no request reaches one, so
+// they share the same dead-end backend the per-project redirects use.
+func buildRedirects(d *Dynamic, set *store.Settings, claimed map[string]bool) {
+	sorted := append([]store.Redirect(nil), set.Redirects...)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Domain != sorted[j].Domain {
+			return sorted[i].Domain < sorted[j].Domain
+		}
+		return sorted[i].Path < sorted[j].Path
+	})
+
+	for i, r := range sorted {
+		if claimed[routeKey(r.Domain, r.Path)] {
+			continue
+		}
+		name := fmt.Sprintf("publix-fw-%d", i)
+		d.HTTP.Middlewares[name+"-redirect"] = &Middleware{
+			RedirectRegex: redirectRegex(r),
+		}
+		d.HTTP.Routers[name] = &Router{
+			Rule:        hostRule(r.Domain, r.Path),
+			EntryPoints: set.EntryPoints,
+			Service:     noopService(d),
+			Middlewares: []string{name + "-redirect"},
+			TLS:         routerTLS(set, deployspec.Route{Domain: r.Domain}),
+		}
+	}
+}
+
+// redirectRegex turns a forwarding rule into Traefik's rewrite.
+//
+// Anchoring on the source host rather than matching everything keeps the
+// middleware inert if it is ever attached to another router by mistake.
+func redirectRegex(r store.Redirect) *RedirectRegex {
+	source := `^https?://` + regexpQuote(r.Domain)
+	if r.Keeps() {
+		return &RedirectRegex{
+			Regex:       source + `/(.*)`,
+			Replacement: r.TargetURL() + "/${1}",
+			Permanent:   r.Permanent,
+		}
+	}
+	// Discarding the path is the deliberate choice to land everyone on one
+	// page, so the replacement carries no capture group — and no trailing
+	// slash either, which would turn a target of /landing into /landing/.
+	return &RedirectRegex{
+		Regex:       source + `/.*`,
+		Replacement: r.TargetURL(),
+		Permanent:   r.Permanent,
+	}
 }
 
 func buildProject(d *Dynamic, set *store.Settings, l Live) {
@@ -174,12 +241,9 @@ func buildProject(d *Dynamic, set *store.Settings, l Live) {
 			d.HTTP.Routers[name] = &Router{
 				Rule:        hostRule(route.Domain, ""),
 				EntryPoints: set.EntryPoints,
-				Service:     "publix-noop",
+				Service:     noopService(d),
 				Middlewares: []string{addRedirect(d, name, route)},
 				TLS:         routerTLS(set, route),
-			}
-			d.HTTP.Services["publix-noop"] = &Service{
-				LoadBalancer: &LoadBalancer{Servers: []Server{{URL: "http://127.0.0.1:1"}}},
 			}
 			continue
 		}
@@ -231,6 +295,17 @@ func addHeaders(d *Dynamic, base string, h map[string]string) string {
 func addBasicAuth(d *Dynamic, base string, users []string) string {
 	name := base + "-auth"
 	d.HTTP.Middlewares[name] = &Middleware{BasicAuth: &BasicAuth{Users: users}}
+	return name
+}
+
+// noopService registers the dead-end backend a redirect router points at.
+// Traefik requires every router to name a service; the middleware answers
+// before a request could ever reach this one.
+func noopService(d *Dynamic) string {
+	const name = "publix-noop"
+	d.HTTP.Services[name] = &Service{
+		LoadBalancer: &LoadBalancer{Servers: []Server{{URL: "http://127.0.0.1:1"}}},
+	}
 	return name
 }
 

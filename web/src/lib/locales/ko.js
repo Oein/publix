@@ -277,6 +277,90 @@ export default {
 
   'settings.title': '설정',
   'settings.tab.server': '서버',
+  'settings.tab.domains': '도메인',
+
+  'domainsPage.appsTitle': '앱 도메인',
+  'domainsPage.appsDesc':
+    '모든 프로젝트에 동작하는 주소를 주는 와일드카드 상위 도메인입니다. *.apps.example.com 을 이 서버로 향하게 하면 blog 라는 프로젝트는 가져오는 순간 blog.apps.example.com 에서 열립니다. 한 서버에서 스테이징과 운영, 또는 두 고객사를 돌린다면 여러 개를 등록하세요. 프로젝트마다 하나를 고르고 나중에 옮길 수 있습니다.',
+  'domainsPage.addDomain': '도메인 추가',
+  'domainsPage.addDomainTitle': '앱 도메인 등록',
+  'domainsPage.domain': '도메인',
+  'domainsPage.domainHint': '와일드카드를 뺀 상위 도메인입니다. 앞에 *. 을 붙여도 자동으로 제거됩니다.',
+  'domainsPage.descriptionHint': '여기에 표시되어 비슷한 도메인을 구분하는 데 씁니다.',
+  'domainsPage.addPreview': 'blog 라는 프로젝트는 {host} 에서 열리게 됩니다.',
+  'domainsPage.register': '등록',
+  'domainsPage.rejected': '저장할 수 없습니다',
+  'domainsPage.registered': '{domain} 을(를) 등록했습니다',
+  'domainsPage.default': '기본',
+  'domainsPage.colAddress': '주소',
+  'domainsPage.colProjects': '프로젝트',
+  'domainsPage.colBehaviour': '동작',
+  'domainsPage.makeDefault': '기본으로 지정',
+  'domainsPage.defaultSet': '이제 {domain} 이(가) 기본입니다',
+  'domainsPage.unregister': '등록 해제',
+  'domainsPage.unregistered': '{domain} 의 등록을 해제했습니다',
+  'domainsPage.unregisterTitle': '{domain} 의 등록을 해제할까요?',
+  'domainsPage.unregisterMessage': '더 이상 이 도메인 아래에 프로젝트를 둘 수 없게 되며, 그 밖에는 바뀌는 것이 없습니다.',
+  'domainsPage.unregisterUsed': {
+    other:
+      '이 도메인 아래에 프로젝트 {count}개({list})가 있습니다. 기본 앱 도메인으로 옮겨지므로 응답하는 주소가 바뀝니다. 각자의 사용자 도메인은 영향을 받지 않습니다.',
+  },
+  'domainsPage.noAppsTitle': '등록된 앱 도메인이 없습니다',
+  'domainsPage.noAppsDesc':
+    '없으면 프로젝트는 스스로 설정한 도메인으로만 접근할 수 있습니다. 와일드카드 상위 도메인을 등록하면 모든 프로젝트가 가져오는 즉시 동작하는 URL을 받습니다.',
+
+  'domainsPage.forwardTitle': '전달(포워딩)',
+  'domainsPage.forwardDesc':
+    '뒤에 아무것도 배포되지 않은 채 방문자를 다른 곳으로 보내는 호스트 이름입니다. 다시 배포할 필요 없이 즉시 적용됩니다. 프로젝트가 실제로 서비스하는 호스트 이름은 여기서 가로챌 수 없습니다. 프로젝트가 우선하고 규칙에는 밀렸다는 표시가 붙습니다.',
+  'domainsPage.addRule': '포워딩 추가',
+  'domainsPage.addRuleTitle': '호스트 이름 포워딩',
+  'domainsPage.editRuleTitle': '포워딩 수정',
+  'domainsPage.from': '보낼 주소',
+  'domainsPage.fromHint': '방문자가 도착하는 호스트 이름입니다. DNS를 이 호스트로 향하게 하세요.',
+  'domainsPage.to': '받을 주소',
+  'domainsPage.toHint': '호스트 이름, 또는 스킴이나 특정 페이지가 중요하면 전체 URL을 적으세요.',
+  'domainsPage.pathPrefix': '경로 접두사',
+  'domainsPage.pathPrefixHint': '선택 사항입니다. 이 경로 아래의 요청만 전달합니다.',
+  'domainsPage.keepPathLabel': '경로 유지',
+  'domainsPage.keepPathHint': '/about 요청은 /about 으로 도착합니다. 끄면 모든 방문자를 한 페이지로 보냅니다.',
+  'domainsPage.dropPath': '경로 버림',
+  'domainsPage.permanentLabel': '영구 (301)',
+  'domainsPage.permanentHint':
+    '브라우저는 영구 리다이렉트를 사실상 영원히 캐시합니다. 최종 목적지가 확실해지기 전까지는 꺼 두세요.',
+  'domainsPage.permanent': '영구',
+  'domainsPage.temporary': '임시',
+  'domainsPage.shadowed': '{project} 이(가) 우선함',
+  'domainsPage.edit': '수정',
+  'domainsPage.ruleSaved': '{domain} 의 포워딩을 저장했습니다',
+  'domainsPage.ruleRemoved': '{domain} 의 포워딩을 제거했습니다',
+  'domainsPage.removeRuleTitle': '{domain} 포워딩을 중단할까요?',
+  'domainsPage.removeRuleMessage':
+    '더 이상 방문자를 {target} 로 보내지 않으며, 다른 것이 이 이름을 가져갈 때까지 404를 응답합니다.',
+  'domainsPage.noRulesTitle': '포워딩 중인 것이 없습니다',
+  'domainsPage.noRulesDesc':
+    '더 이상 아무것도 호스팅하지 않는 도메인, apex로 보내야 하는 www, 다른 곳을 가리키는 별칭에 쓰세요. 프로젝트는 deployment.yaml에서 자체 리다이렉트를 선언할 수도 있습니다.',
+  'domainsPage.forwardNote':
+    '즉시 적용되며 다시 배포할 필요가 없습니다. 프로젝트가 실제로 서비스하는 호스트 이름은 여기 규칙이 가로채지 못합니다. 프로젝트가 우선하고, 규칙에는 우선순위에 밀렸다는 표시가 붙습니다.',
+
+  'domainsPage.dnsNote':
+    '인증서는 해당 호스트 이름으로 첫 요청이 올 때 Traefik이 발급받습니다. 그래서 아직 해석되지 않는 레코드는 라우팅 오류가 아니라 인증서 오류로 나타납니다.',
+
+  'id.appsDomain': '앱 도메인',
+  'id.appsDomainHint': '이 프로젝트의 자동 생성 주소가 어느 상위 도메인에 붙을지 정합니다.',
+  'id.appsDomainDefault': '기본 ({domain})',
+  'id.appsDomainNone': '없음 — 직접 설정한 도메인만 사용',
+  'id.willBeAt': '접속 주소',
+  'id.noGeneratedHost': '자동 생성 주소가 없습니다. 위에서 도메인을 설정하지 않으면 접근할 수 없습니다.',
+
+  'domains.generatedDesc': 'publix가 이 프로젝트에 기본으로 주는 주소입니다.',
+  'domains.appsDomain': '앱 도메인',
+  'domains.appsDomainDefault': '기본 ({domain})',
+  'domains.appsDomainNone': '없음 — 위에 설정한 도메인만 사용',
+  'domains.noGeneratedHost': '이 프로젝트에는 자동 생성 주소가 없습니다. 위의 도메인으로만 응답합니다.',
+  'domains.noAppsDomains': '이 서버에 등록된 앱 도메인이 없어서 프로젝트가 기본 주소를 받지 못합니다.',
+  'domains.manageAppsDomains': '앱 도메인 관리',
+  'domains.moved': '이제 {host} 에서 열립니다',
+  'domains.movedNone': '자동 생성 주소를 제거했습니다',
   'settings.tab.volumes': '볼륨',
   'settings.tab.github': 'GitHub',
   'settings.tab.account': '계정',
@@ -293,9 +377,6 @@ export default {
   'server.liveCount': '{count}개 운영 중',
   'server.ofTotal': '전체 {count}개',
   'server.addresses': '주소',
-  'server.appsDomain': '앱 도메인',
-  'server.appsDomainHint':
-    '와일드카드 도메인입니다. 따로 설정하지 않아도 모든 프로젝트가 동작하는 URL을 받습니다. apps.example.com 으로 두면 blog 라는 프로젝트는 blog.apps.example.com 에서 열립니다. *.apps.example.com 을 이 호스트로 향하게 하세요.',
   'server.publicUrl': '공개 URL',
   'server.publicUrlHint':
     '이 대시보드가 인터넷에서 열리는 주소입니다. GitHub 웹훅이 이 주소로 오므로 푸시 배포에 필요합니다.',
@@ -323,35 +404,23 @@ export default {
   'server.saved': '설정을 저장했습니다 — 라우팅을 다시 기록했습니다.',
 
   'vol.projectTitle': '프로젝트 볼륨',
-  'vol.projectDesc': '프로젝트가 혼자 쓰는 저장소입니다.',
+  'vol.projectDesc':
+    '프로젝트가 혼자 쓰는 저장소입니다. 프로젝트는 deployment.yaml에서 볼륨을 이름으로 요청할 뿐 호스트 경로는 적지 않으며, publix가 <호스트 경로>/<프로젝트 ID> 를 /shared/<이름> 에 마운트합니다. 이 프로젝트별 하위 디렉터리가 격리 경계입니다. 두 프로젝트가 모두 disk0 을 마운트해도 서로의 파일에 닿을 수 없습니다.',
   'vol.register': '볼륨 등록',
-  'vol.projectExplain':
-    '프로젝트는 {file} 에서 볼륨을 {byName} 요청하며, 호스트 경로는 절대 적지 않습니다. publix는 {hostPath} 를 컨테이너의 {mount} 에 마운트합니다.',
-  'vol.projectExplainNote':
-    '프로젝트별 하위 디렉터리가 격리 경계입니다. 두 프로젝트가 모두 {name} 을(를) 마운트해도 서로의 파일에 닿을 수 없습니다. 프로젝트 ID는 바뀌지 않으므로 이름을 바꿔도 데이터가 유실되거나 노출되지 않습니다.',
-  'vol.byName': '이름으로',
-  'vol.tokenHostPath': '<호스트 경로>',
-  'vol.tokenProjectId': '<프로젝트 ID>',
-  'vol.tokenName': '<이름>',
   'vol.noProjectTitle': '프로젝트 볼륨이 없습니다',
   'vol.noProjectDesc':
     '디렉터리를 등록하면 프로젝트가 배포 사이에 데이터를 유지할 수 있습니다 — 업로드, 캐시, 데이터베이스를 각자의 공간에.',
   'vol.registerAVolume': '볼륨 등록하기',
   'vol.sharedTitle': '공유 볼륨',
-  'vol.sharedDesc': '마운트한 모든 프로젝트가 함께 읽고 쓰는 하나의 디렉터리입니다.',
-  'vol.sharedExplain':
-    '공유 볼륨을 마운트한 모든 프로젝트는 {same} 디렉터리, 즉 {hostPath} 를 그대로 받습니다. 프로젝트별 하위 디렉터리는 없습니다. 미디어 라이브러리, 데이터셋, 공용 캐시처럼 바로 그것이 목적일 때 쓰세요.',
-  'vol.same': '같은',
-  'vol.sharedExplainNote':
-    '대신 격리가 없습니다. 마운트한 어떤 프로젝트든 다른 프로젝트가 쓴 것을 읽고 덮어쓰고 지울 수 있습니다. 읽기만 필요하다면 읽기 전용으로 표시하세요.',
+  'vol.sharedDesc':
+    '마운트한 모든 프로젝트가 함께 읽고 쓰는 하나의 디렉터리입니다. 프로젝트별 하위 디렉터리 없이 <호스트 경로> 를 그대로 받습니다. 미디어 라이브러리, 데이터셋, 공용 캐시처럼 바로 그것이 목적일 때 쓰세요. 대신 격리가 없으므로, 읽기만 필요하다면 읽기 전용으로 표시하세요.',
   'vol.noSharedTitle': '공유 볼륨이 없습니다',
   'vol.noSharedDesc':
     '여러 프로젝트가 정말로 같은 파일을 필요로 할 때 등록하세요. 각자의 저장 공간이 필요하다면 프로젝트 볼륨을 쓰세요.',
   'vol.registerAShared': '공유 볼륨 등록하기',
-  'vol.host': '호스트',
   'vol.readOnly': '읽기 전용',
-  'vol.usedBy': '{list} 이(가) 사용 중',
-  'vol.notUsed': '사용하는 프로젝트 없음',
+  'vol.colHost': '호스트 디렉터리',
+  'vol.colMount': '마운트 위치',
   'vol.unregister': '등록 해제',
   'vol.usingTitle': '프로젝트에서 볼륨 쓰기',
   'vol.usingBlurb':
@@ -379,6 +448,7 @@ export default {
   'vol.previewProject':
     'ID가 {id} 인 프로젝트는 {path} 를 {mount} 에서 봅니다. 같은 볼륨을 마운트한 다른 프로젝트는 자기만의 디렉터리를 받습니다.',
   'vol.registerButton': '등록',
+  'vol.rejected': '이 볼륨은 등록할 수 없습니다',
   'vol.registered': '{name} 을(를) 등록했습니다',
   'vol.unregistered': '{name} 의 등록을 해제했습니다 — 데이터는 디스크에 그대로 남았습니다.',
   'vol.unregisterTitle': '{name} 의 등록을 해제할까요?',

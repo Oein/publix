@@ -56,7 +56,13 @@
   .error { border-left-color: var(--bad); }
   .info { border-left-color: var(--busy); }
 
-  .message { font-size: 13px; line-height: 1.45; }
+  /* Server errors can be a list — a rejected volume names every rule it
+     broke — and the newlines are how it reads as one. */
+  .message {
+    font-size: 13px;
+    line-height: 1.45;
+    white-space: pre-line;
+  }
 
   ul {
     margin: 6px 0 0;

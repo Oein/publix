@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -29,10 +30,25 @@ type Settings struct {
 	// CertResolver is the Traefik ACME resolver name. Empty disables TLS.
 	CertResolver string `json:"certResolver"`
 
-	// AppsDomain is the wildcard parent domain used to give every project a
-	// working URL before anyone configures a custom domain, e.g.
-	// "apps.example.com" yields "<project>.apps.example.com".
-	AppsDomain string `json:"appsDomain,omitempty"`
+	// AppsDomains are the wildcard parent domains registered by the
+	// operator. Each gives projects a working URL before anyone configures
+	// a custom domain: "apps.example.com" yields "<project>.apps.example.com".
+	//
+	// There is a list rather than one because a server usually hosts more
+	// than one thing — staging and production, or two clients — and which
+	// parent a project sits under is a per-project decision made when it is
+	// imported.
+	AppsDomains []AppsDomain `json:"appsDomains,omitempty"`
+
+	// LegacyAppsDomain is where the single apps domain lived before there
+	// could be several. It is migrated into AppsDomains on load and then
+	// left empty; the field remains only so an older state file opens.
+	LegacyAppsDomain string `json:"appsDomain,omitempty"`
+
+	// Redirects forward hostnames that have no project behind them —
+	// a retired domain, a www that should reach the apex, a vanity name
+	// pointing at somewhere else entirely.
+	Redirects []Redirect `json:"redirects,omitempty"`
 
 	// Volumes are host directories the operator has made available to
 	// projects. See Volume for the two scopes and what each guarantees.
@@ -92,6 +108,70 @@ const (
 	// one project can destroy another's data, so it is never the default.
 	ScopeShared VolumeScope = "shared"
 )
+
+// AppsDomain is a wildcard parent domain registered by the operator.
+//
+// Registering one is a claim about DNS, not about any project: it says
+// *.<domain> resolves to this host. Projects then pick which registered
+// parent their generated hostname sits under.
+type AppsDomain struct {
+	// Domain is the parent, e.g. "apps.example.com".
+	Domain string `json:"domain"`
+	// Default marks the one new projects get when they express no
+	// preference. Exactly one registered domain is the default.
+	Default bool `json:"default,omitempty"`
+	// Description is shown in the dashboard, to tell two similar domains
+	// apart at a glance.
+	Description string `json:"description,omitempty"`
+}
+
+// AppsDomainNone is the value a project uses to opt out of a generated
+// hostname entirely, when it should answer only on its own domains.
+//
+// It cannot collide with a real registration: every apps domain must
+// contain a dot, and this does not.
+const AppsDomainNone = "none"
+
+// Redirect forwards one hostname somewhere else, with nothing deployed
+// behind it.
+//
+// A project can already declare redirects in its deployment.yaml, but those
+// belong to the project and disappear with it. These belong to the server,
+// which is where a domain you no longer host anything on has to live.
+type Redirect struct {
+	// Domain is the hostname being forwarded.
+	Domain string `json:"domain"`
+	// Path narrows the rule to a prefix. Empty forwards the whole host.
+	Path string `json:"path,omitempty"`
+	// Target is where requests go: a hostname, or a full URL when the
+	// scheme matters or the destination is a fixed page.
+	Target string `json:"target"`
+	// KeepPath appends the request's path and query to the target. It
+	// defaults to true, because a domain move should not turn every
+	// bookmark under the old host into a landing on the new home page.
+	KeepPath *bool `json:"keepPath,omitempty"`
+	// Permanent sends 301 rather than 302.
+	//
+	// It defaults to off: a browser caches a permanent redirect more or
+	// less forever, so getting one wrong is expensive to undo and the
+	// person adding it usually cannot tell yet whether it is right.
+	Permanent bool `json:"permanent,omitempty"`
+	// Description is shown in the dashboard.
+	Description string `json:"description,omitempty"`
+}
+
+// Keeps reports whether the request path is carried across.
+func (r Redirect) Keeps() bool { return r.KeepPath == nil || *r.KeepPath }
+
+// TargetURL is the destination as an absolute URL. A bare hostname becomes
+// https, since that is the only thing worth redirecting to.
+func (r Redirect) TargetURL() string {
+	t := strings.TrimSuffix(strings.TrimSpace(r.Target), "/")
+	if strings.HasPrefix(t, "http://") || strings.HasPrefix(t, "https://") {
+		return t
+	}
+	return "https://" + t
+}
 
 // Volume is a host directory the operator exposes to projects.
 //
@@ -189,6 +269,134 @@ func DefaultSettings() Settings {
 // TLSEnabled reports whether routes get certificates.
 func (s *Settings) TLSEnabled() bool { return s.CertResolver != "" }
 
+// DefaultAppsDomain is the parent a project gets when it expresses no
+// preference. With none marked default the first registered one is used,
+// so a list can never be non-empty and yet yield nothing.
+func (s *Settings) DefaultAppsDomain() string {
+	for _, d := range s.AppsDomains {
+		if d.Default {
+			return d.Domain
+		}
+	}
+	if len(s.AppsDomains) > 0 {
+		return s.AppsDomains[0].Domain
+	}
+	return ""
+}
+
+// HasAppsDomain reports whether a domain is registered.
+func (s *Settings) HasAppsDomain(domain string) bool {
+	for _, d := range s.AppsDomains {
+		if strings.EqualFold(d.Domain, domain) {
+			return true
+		}
+	}
+	return false
+}
+
+// AppsDomainNames lists every registered parent, for an error that has to
+// say what is actually on offer.
+func (s *Settings) AppsDomainNames() []string {
+	out := make([]string, 0, len(s.AppsDomains))
+	for _, d := range s.AppsDomains {
+		out = append(out, d.Domain)
+	}
+	return out
+}
+
+// AppsDomainFor resolves the parent domain a project's generated hostname
+// sits under.
+//
+// A choice that is no longer registered falls back to the default rather
+// than leaving the project unreachable: the operator removed a domain, and
+// silently dropping every project that used it is the worse failure. Only
+// an explicit opt-out yields nothing.
+func (s *Settings) AppsDomainFor(p *Project) string {
+	if p == nil {
+		return s.DefaultAppsDomain()
+	}
+	switch {
+	case p.AppsDomain == AppsDomainNone:
+		return ""
+	case p.AppsDomain != "" && s.HasAppsDomain(p.AppsDomain):
+		return p.AppsDomain
+	default:
+		return s.DefaultAppsDomain()
+	}
+}
+
+// Redirect looks up a registered forwarding rule.
+func (s *Settings) Redirect(domain, path string) (Redirect, bool) {
+	for _, r := range s.Redirects {
+		if strings.EqualFold(r.Domain, domain) && r.Path == path {
+			return r, true
+		}
+	}
+	return Redirect{}, false
+}
+
+// ValidateRedirect checks a forwarding rule before it is saved.
+func (s *Settings) ValidateRedirect(r Redirect, replacing string) error {
+	if r.Domain == "" {
+		return fmt.Errorf("a hostname to forward is required")
+	}
+	if !hostnameRe.MatchString(r.Domain) {
+		return fmt.Errorf("%q is not a hostname", r.Domain)
+	}
+	if strings.TrimSpace(r.Target) == "" {
+		return fmt.Errorf("a target is required — where should %s go?", r.Domain)
+	}
+	target := r.TargetURL()
+	if host := strings.TrimPrefix(strings.TrimPrefix(target, "https://"), "http://"); host == "" {
+		return fmt.Errorf("%q is not a target", r.Target)
+	}
+	// A rule pointing at its own source is a loop the browser gives up on
+	// after a dozen hops, with no clue as to why.
+	if strings.EqualFold(strings.TrimPrefix(strings.TrimPrefix(target, "https://"), "http://"), r.Domain) && r.Path == "" {
+		return fmt.Errorf("%s would forward to itself", r.Domain)
+	}
+	if r.Path != "" && !strings.HasPrefix(r.Path, "/") {
+		return fmt.Errorf("a path must start with /, got %q", r.Path)
+	}
+	for _, existing := range s.Redirects {
+		if strings.EqualFold(existing.Domain, replacing) && existing.Path == r.Path {
+			continue
+		}
+		if strings.EqualFold(existing.Domain, r.Domain) && existing.Path == r.Path {
+			return fmt.Errorf("%s is already forwarded", r.Domain)
+		}
+	}
+	return nil
+}
+
+// hostnameRe is the same shape as an apps domain, but a redirect source may
+// also be a wildcard-free single label under a suffix, so it is reused.
+var hostnameRe = appsDomainRe
+
+// appsDomainRe matches a hostname that can act as a wildcard parent. A
+// leading "*." is accepted and stripped, because that is how the DNS record
+// is written and pasting it in is the obvious mistake to forgive.
+var appsDomainRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
+
+// NormaliseAppsDomain cleans and validates a domain for registration.
+func NormaliseAppsDomain(domain string) (string, error) {
+	d := strings.ToLower(strings.TrimSpace(domain))
+	d = strings.TrimPrefix(d, "*.")
+	d = strings.TrimSuffix(strings.TrimPrefix(d, "https://"), "/")
+	d = strings.TrimSuffix(strings.TrimPrefix(d, "http://"), "/")
+	d = strings.Trim(d, ".")
+	if d == "" {
+		return "", fmt.Errorf("a domain is required")
+	}
+	if d == AppsDomainNone {
+		return "", fmt.Errorf("%q is reserved: it is how a project says it wants no generated hostname", AppsDomainNone)
+	}
+	if !appsDomainRe.MatchString(d) {
+		return "", fmt.Errorf("%q is not a hostname — it should look like apps.example.com", domain)
+	}
+	return d, nil
+}
+
 // Volume looks up a registered volume by name.
 func (s *Settings) Volume(name string) (Volume, bool) {
 	for _, v := range s.Volumes {
@@ -211,6 +419,61 @@ func (s *Settings) VolumeNames() []string {
 
 var volumeNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
 
+// systemPaths are host directories a volume may never be rooted at or
+// inside. Handing a project one of these is not a misconfiguration to warn
+// about; it is a way to take over the machine.
+//
+// "/run" is here as well as "/var/run" because on a modern system one is a
+// symlink to the other, and the Docker socket underneath either is root.
+var systemPaths = []string{
+	"/bin", "/boot", "/dev", "/etc", "/lib", "/lib32", "/lib64", "/libx32",
+	"/proc", "/root", "/run", "/sbin", "/sys", "/usr", "/var/lib/docker",
+	"/var/run",
+}
+
+// Deliberately absent: /mnt, /opt, /srv and /home. Those are where an
+// operator actually keeps data, and refusing them would leave nowhere to
+// put a volume.
+
+// ProtectedPaths lists every directory this server refuses to hand out,
+// including the ones it derives from its own configuration.
+//
+// publix's own state is the sharpest edge of all: the state file holds
+// every project's secrets and the GitHub credentials, and the Traefik file
+// decides what each hostname reaches. A project that could write either
+// would own the platform, so those are refused alongside the system's.
+func (s *Settings) ProtectedPaths() []string {
+	paths := append([]string(nil), systemPaths...)
+	for _, own := range []string{Home(), s.WorkDir, s.TraefikDynamicDir} {
+		if own != "" && filepath.IsAbs(own) {
+			paths = append(paths, filepath.Clean(own))
+		}
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+// within reports whether path is dir or sits inside it.
+func within(path, dir string) bool {
+	if path == dir {
+		return true
+	}
+	return strings.HasPrefix(path, strings.TrimSuffix(dir, "/")+"/")
+}
+
+// resolve returns the path a volume really points at, following symlinks
+// where it can. A link into /etc is still /etc, and checking only the name
+// someone typed would miss it.
+//
+// A path that does not exist yet cannot be resolved, and is returned
+// unchanged: it is checked as written, and the caller creates it.
+func resolve(path string) string {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Clean(real)
+	}
+	return path
+}
+
 // ValidateVolume checks a volume registration before it is saved. Getting
 // this wrong exposes host paths to every project on the box, so the checks
 // are deliberately strict.
@@ -219,32 +482,76 @@ func (s *Settings) ValidateVolume(v Volume, editing string) error {
 	if !volumeNameRe.MatchString(v.Name) {
 		errs = append(errs, fmt.Sprintf("name %q must be lowercase alphanumeric with dots, dashes or underscores", v.Name))
 	}
-	if !filepath.IsAbs(v.Path) {
+
+	// Clean here rather than trusting the caller: ValidateVolume is the
+	// gate, so it has to see the path the kernel will.
+	path := filepath.Clean(v.Path)
+	switch {
+	case v.Path == "":
+		errs = append(errs, "a host path is required")
+	case !filepath.IsAbs(path):
 		errs = append(errs, fmt.Sprintf("path %q must be absolute", v.Path))
-	}
-	if clean := filepath.Clean(v.Path); clean != filepath.Clean(v.Path) || strings.Contains(v.Path, "..") {
-		errs = append(errs, "path must not contain \"..\"")
-	}
-	// Handing out a subdirectory of any of these would let a project read
-	// or overwrite the host's own state.
-	for _, forbidden := range []string{"/", "/etc", "/usr", "/bin", "/sbin", "/lib", "/boot", "/dev", "/proc", "/sys", "/var/run", "/root"} {
-		if filepath.Clean(v.Path) == forbidden {
-			errs = append(errs, fmt.Sprintf("path %q is a system directory and cannot be shared with projects", v.Path))
+	case path == "/":
+		errs = append(errs, "path \"/\" is the whole host filesystem and cannot be shared with projects")
+	default:
+		real := resolve(path)
+		for _, forbidden := range s.ProtectedPaths() {
+			if within(path, forbidden) || within(real, forbidden) {
+				where := path
+				if real != path {
+					where = fmt.Sprintf("%s (which resolves to %s)", path, real)
+				}
+				// "X is inside X" reads as a mistake when the path is the
+				// protected directory itself.
+				relation := "is inside"
+				if path == forbidden || real == forbidden {
+					relation = "is"
+				}
+				errs = append(errs, fmt.Sprintf(
+					"path %s %s %s, which publix will not share with projects", where, relation, forbidden))
+				break
+			}
 		}
 	}
-	if v.DefaultMount != "" && !strings.HasPrefix(v.DefaultMount, "/") {
-		errs = append(errs, fmt.Sprintf("defaultMount %q must be an absolute path", v.DefaultMount))
+
+	// Nesting one volume inside another quietly destroys the isolation the
+	// scopes promise: a shared volume containing a project volume's root
+	// lets every project read every other project's directory.
+	if filepath.IsAbs(path) {
+		for _, existing := range s.Volumes {
+			if existing.Name == editing {
+				continue
+			}
+			other := filepath.Clean(existing.Path)
+			if within(path, other) || within(other, path) {
+				errs = append(errs, fmt.Sprintf(
+					"path %s overlaps the volume %q at %s; one volume inside another defeats the isolation between them",
+					path, existing.Name, other))
+			}
+		}
 	}
+
+	if v.DefaultMount != "" {
+		switch {
+		case !strings.HasPrefix(v.DefaultMount, "/"):
+			errs = append(errs, fmt.Sprintf("defaultMount %q must be an absolute path", v.DefaultMount))
+		case filepath.Clean(v.DefaultMount) == "/":
+			errs = append(errs, "defaultMount \"/\" would mount over the container's whole filesystem")
+		}
+	}
+
 	switch v.Scope {
 	case ScopeProject, ScopeShared:
 	default:
 		errs = append(errs, fmt.Sprintf("scope %q is not one of project, shared", v.Scope))
 	}
+
 	for _, existing := range s.Volumes {
 		if existing.Name == v.Name && existing.Name != editing {
 			errs = append(errs, fmt.Sprintf("a volume named %q already exists", v.Name))
 		}
 	}
+
 	if len(errs) > 0 {
 		return fmt.Errorf("invalid volume:\n  - %s", strings.Join(errs, "\n  - "))
 	}

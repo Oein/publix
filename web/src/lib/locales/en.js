@@ -283,6 +283,94 @@ export default {
 
   'settings.title': 'Settings',
   'settings.tab.server': 'Server',
+  'settings.tab.domains': 'Domains',
+
+  'domainsPage.appsTitle': 'Apps domains',
+  'domainsPage.appsDesc':
+    'Wildcard parents that give every project a working address. Point *.apps.example.com at this server and a project named blog answers on blog.apps.example.com the moment it is imported. Register several when a server hosts staging and production, or two clients — each project picks one, and can be moved later.',
+  'domainsPage.addDomain': 'Add domain',
+  'domainsPage.addDomainTitle': 'Register an apps domain',
+  'domainsPage.domain': 'Domain',
+  'domainsPage.domainHint': 'The parent, without the wildcard. A leading *. is fine and will be stripped.',
+  'domainsPage.descriptionHint': 'Shown here, to tell two similar domains apart.',
+  'domainsPage.addPreview': 'A project named blog would be reachable at {host}.',
+  'domainsPage.register': 'Register',
+  'domainsPage.rejected': 'publix will not save this',
+  'domainsPage.registered': 'Registered {domain}',
+  'domainsPage.default': 'Default',
+  'domainsPage.colAddress': 'Address',
+  'domainsPage.colProjects': 'Projects',
+  'domainsPage.colBehaviour': 'Behaviour',
+  'domainsPage.makeDefault': 'Make default',
+  'domainsPage.defaultSet': '{domain} is now the default',
+  'domainsPage.unregister': 'Unregister',
+  'domainsPage.unregistered': 'Unregistered {domain}',
+  'domainsPage.unregisterTitle': 'Unregister {domain}?',
+  'domainsPage.unregisterMessage':
+    'Projects can no longer be placed under it, and nothing else changes.',
+  'domainsPage.unregisterUsed': {
+    one: '{list} sits under it and will move to the default apps domain, which changes the address it answers on. Its custom domains are unaffected.',
+    other:
+      '{count} projects sit under it ({list}) and will move to the default apps domain, which changes the addresses they answer on. Their custom domains are unaffected.',
+  },
+  'domainsPage.noAppsTitle': 'No apps domain registered',
+  'domainsPage.noAppsDesc':
+    'Without one, a project is only reachable on the domains it configures itself. Register a wildcard parent and every project gets a working URL the moment it is imported.',
+
+  'domainsPage.forwardTitle': 'Forwarding',
+  'domainsPage.forwardDesc':
+    'Hostnames that send visitors somewhere else, with nothing deployed behind them. Changes take effect immediately, with no redeploy. A hostname a project actually serves is never taken over here — the project wins, and the rule shows as overridden.',
+  'domainsPage.addRule': 'Add forwarding',
+  'domainsPage.addRuleTitle': 'Forward a hostname',
+  'domainsPage.editRuleTitle': 'Edit forwarding',
+  'domainsPage.from': 'Forward',
+  'domainsPage.fromHint': 'The hostname visitors arrive on. Point its DNS at this host.',
+  'domainsPage.to': 'To',
+  'domainsPage.toHint': 'A hostname, or a full URL when the scheme or a fixed page matters.',
+  'domainsPage.pathPrefix': 'Path prefix',
+  'domainsPage.pathPrefixHint': 'Optional. Forward only requests under this path.',
+  'domainsPage.keepPathLabel': 'Keep the path',
+  'domainsPage.keepPathHint':
+    'A request for /about lands on /about. Turn this off to send every visitor to one page.',
+  'domainsPage.dropPath': 'Drops the path',
+  'domainsPage.permanentLabel': 'Permanent (301)',
+  'domainsPage.permanentHint':
+    'Browsers cache a permanent redirect more or less forever, so leave it off until you are sure this is the final destination.',
+  'domainsPage.permanent': 'Permanent',
+  'domainsPage.temporary': 'Temporary',
+  'domainsPage.shadowed': 'Overridden by {project}',
+  'domainsPage.edit': 'Edit',
+  'domainsPage.ruleSaved': 'Forwarding for {domain} saved',
+  'domainsPage.ruleRemoved': 'Forwarding for {domain} removed',
+  'domainsPage.removeRuleTitle': 'Stop forwarding {domain}?',
+  'domainsPage.removeRuleMessage':
+    'It will stop sending visitors to {target}, and answer with a 404 until something else claims it.',
+  'domainsPage.noRulesTitle': 'Nothing is being forwarded',
+  'domainsPage.noRulesDesc':
+    'Use this for a domain you no longer host anything on, a www that should reach the apex, or a vanity name pointing somewhere else. A project can also declare its own redirects in deployment.yaml.',
+  'domainsPage.forwardNote':
+    'These take effect immediately — no redeploy. A hostname a project actually serves is never taken over by a rule here; the project wins and the rule is marked as overridden.',
+
+  'domainsPage.dnsNote':
+    'Certificates are requested by Traefik on the first request to a hostname, so a record that does not resolve yet fails as a certificate error rather than a routing one.',
+
+  'id.appsDomain': 'Apps domain',
+  'id.appsDomainHint': 'Which registered parent this project\u2019s generated address sits under.',
+  'id.appsDomainDefault': 'Default ({domain})',
+  'id.appsDomainNone': 'None — only the domains I configure',
+  'id.willBeAt': 'Reachable at',
+  'id.noGeneratedHost': 'No generated address. Configure a domain above, or the project will not be reachable.',
+
+  'domains.generatedDesc': 'The address publix gives this project for free.',
+  'domains.appsDomain': 'Apps domain',
+  'domains.appsDomainDefault': 'Default ({domain})',
+  'domains.appsDomainNone': 'None — only the domains configured above',
+  'domains.noGeneratedHost': 'This project has no generated address. It answers only on the domains above.',
+  'domains.noAppsDomains':
+    'No apps domain is registered on this server, so projects get no free address.',
+  'domains.manageAppsDomains': 'Manage apps domains',
+  'domains.moved': 'Now reachable at {host}',
+  'domains.movedNone': 'The generated address was removed',
   'settings.tab.volumes': 'Volumes',
   'settings.tab.github': 'GitHub',
   'settings.tab.account': 'Account',
@@ -299,9 +387,6 @@ export default {
   'server.liveCount': '{count} live',
   'server.ofTotal': 'of {count}',
   'server.addresses': 'Addresses',
-  'server.appsDomain': 'Apps domain',
-  'server.appsDomainHint':
-    'A wildcard domain, so every project gets a working URL before you configure one. With apps.example.com a project named blog is reachable at blog.apps.example.com. Point *.apps.example.com at this host.',
   'server.publicUrl': 'Public URL',
   'server.publicUrlHint':
     'Where this dashboard is reachable from the internet. GitHub webhooks are pointed here, so deploy-on-push needs it.',
@@ -329,35 +414,23 @@ export default {
   'server.saved': 'Settings saved — routing was rewritten.',
 
   'vol.projectTitle': 'Project volumes',
-  'vol.projectDesc': 'Storage a project keeps to itself.',
+  'vol.projectDesc':
+    'Storage a project keeps to itself. A project asks for a volume by name in its deployment.yaml and never names a host path; publix mounts <host path>/<project id> at /shared/<name>. That per-project subdirectory is the isolation boundary — two projects can both mount disk0 and neither reaches the other’s files.',
   'vol.register': 'Register volume',
-  'vol.projectExplain':
-    'A project asks for a volume {byName} in its {file} — it never names a host path. publix mounts {hostPath} into the container at {mount}.',
-  'vol.projectExplainNote':
-    "The per-project subdirectory is the isolation boundary: two projects can both mount {name} and neither can reach the other's files. The project ID never changes, so renaming a project cannot orphan or expose its data.",
-  'vol.byName': 'by name',
-  'vol.tokenHostPath': '<host path>',
-  'vol.tokenProjectId': '<project id>',
-  'vol.tokenName': '<name>',
   'vol.noProjectTitle': 'No project volumes',
   'vol.noProjectDesc':
     'Register a directory and projects can persist data across deployments — uploads, caches, databases — each in its own place.',
   'vol.registerAVolume': 'Register a volume',
   'vol.sharedTitle': 'Shared volumes',
-  'vol.sharedDesc': 'One directory that every project mounting it reads and writes.',
-  'vol.sharedExplain':
-    'Every project that mounts a shared volume gets the {same} directory — {hostPath}, with no per-project subdirectory. That is the point: a media library, a dataset, a common cache.',
-  'vol.same': 'same',
-  'vol.sharedExplainNote':
-    'It also means there is no isolation. Any project mounting it can read, overwrite or delete what another one wrote. Mark it read-only if the projects using it only need to read.',
+  'vol.sharedDesc':
+    'One directory that every project mounting it reads and writes — <host path> itself, with no per-project subdirectory. That is the point: a media library, a dataset, a common cache. It also means no isolation, so mark it read-only if the projects using it only need to read.',
   'vol.noSharedTitle': 'No shared volumes',
   'vol.noSharedDesc':
     'Register one when several projects genuinely need the same files. If they each need their own storage, use a project volume instead.',
   'vol.registerAShared': 'Register a shared volume',
-  'vol.host': 'host',
   'vol.readOnly': 'Read-only',
-  'vol.usedBy': 'Used by {list}',
-  'vol.notUsed': 'Not used by any project',
+  'vol.colHost': 'Host directory',
+  'vol.colMount': 'Mounted at',
   'vol.unregister': 'Unregister',
   'vol.usingTitle': 'Using a volume in a project',
   'vol.usingBlurb':
@@ -385,6 +458,7 @@ export default {
   'vol.previewProject':
     'A project with ID {id} would see {path} at {mount}. Another project mounting the same volume gets its own directory.',
   'vol.registerButton': 'Register',
+  'vol.rejected': 'publix will not register this volume',
   'vol.registered': 'Registered {name}',
   'vol.unregistered': 'Unregistered {name} — its data was left on disk.',
   'vol.unregisterTitle': 'Unregister {name}?',

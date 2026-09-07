@@ -74,7 +74,8 @@ the server:
 
 and ports 80 and 443 open. Then, in the dashboard:
 
-1. **Settings → Server** — set the apps domain and the public URL.
+1. **Settings → Domains** — register an apps domain, and **Settings →
+   Server** — set the public URL.
 2. **Settings → GitHub** — connect a personal access token (classic tokens
    need `repo`; fine-grained ones need Contents, Metadata, Webhooks and
    Commit statuses) or a GitHub App, which is the right choice for an
@@ -206,6 +207,10 @@ routes:
       - "admin:$apr1$..."      # htpasswd format
 ```
 
+These belong to the repository, so a rollback restores the domains that
+commit declared. Server-wide domains are configured in the dashboard
+instead — see [Domains](#domains).
+
 ### Environment
 
 Values may reference three namespaces. An unresolved reference fails the
@@ -252,6 +257,17 @@ A project volume is named after the project ID, which never changes even if
 you rename the project, so renaming can never orphan or expose its data. A
 shared volume has no isolation at all — that is what it is for, and why it
 is never the default.
+
+Registration is checked before anything is written. publix refuses a host
+path that is, or sits inside, a system directory (`/etc`, `/usr`, `/root`,
+`/run`, `/var/lib/docker` and the rest), and refuses its own state, work and
+Traefik directories — a project able to write those would hold every other
+project's secrets, or decide what each hostname reaches. Symlinks are
+resolved first, so a link into `/etc` is caught as `/etc`. It also refuses a
+path that overlaps a volume already registered: one volume inside another
+would let a shared volume expose the per-project directories underneath it,
+which is exactly what the scopes promise cannot happen. The dialog lists
+every rule a registration broke.
 
 ### Release
 
@@ -337,6 +353,41 @@ Rolling back a Compose stack rebuilds it from the target commit, because
 there is no second generation to switch back to.
 
 ---
+
+## Domains
+
+Two kinds of domain live in **Settings → Domains**, and they are the same
+decision from opposite ends: which parents projects sit under, and what
+happens to hostnames with nothing under them at all.
+
+**Apps domains** are wildcard parents. Point `*.apps.example.com` at the
+server, register it, and a project named `blog` answers on
+`blog.apps.example.com` the moment it is imported — no DNS, no certificate,
+nothing to configure. Register more than one when a server hosts more than
+one thing: staging and production, or two clients. Each project picks its
+parent when it is imported, and can be moved later from its own **Domains**
+tab; a project can also opt out and answer only on the domains it
+configures. One parent is the default, which is what a project gets when it
+expresses no preference — change the default and every such project moves.
+
+Unregistering a parent never takes a project offline: projects that named it
+fall back to the default, and keep the setting so re-registering restores
+them.
+
+**Forwarding** sends a hostname somewhere else with nothing deployed behind
+it — a domain you no longer host, a `www` that should reach the apex, a
+vanity name pointing at a page. Each rule chooses whether the request path
+carries across, and whether the redirect is permanent. It defaults to
+temporary: a browser caches a permanent redirect more or less forever, and
+the person adding one usually cannot yet tell whether it is right.
+
+Forwarding takes effect immediately, with no redeploy — routing is a file
+Traefik hot-reloads. A hostname a project actually serves is never taken
+over by a rule; the project wins, and the rule is shown as overridden.
+
+A project can also declare its own redirects in `deployment.yaml` (see
+[Routing](#routing)). Those belong to the repository and are versioned with
+it; these belong to the server and outlive any project.
 
 ## The command line
 

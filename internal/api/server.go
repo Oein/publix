@@ -108,6 +108,12 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/settings", auth(s.handleGetSettings))
 	mux.HandleFunc("PUT /api/settings", auth(s.handleSetSettings))
+	mux.HandleFunc("POST /api/apps-domains", auth(s.handleAddAppsDomain))
+	mux.HandleFunc("POST /api/apps-domains/{domain}/default", auth(s.handleSetDefaultAppsDomain))
+	mux.HandleFunc("DELETE /api/apps-domains/{domain}", auth(s.handleDeleteAppsDomain))
+	mux.HandleFunc("POST /api/redirects", auth(s.handleAddRedirect))
+	mux.HandleFunc("PUT /api/redirects/{domain}", auth(s.handleUpdateRedirect))
+	mux.HandleFunc("DELETE /api/redirects/{domain}", auth(s.handleDeleteRedirect))
 	mux.HandleFunc("POST /api/volumes", auth(s.handleAddVolume))
 	mux.HandleFunc("DELETE /api/volumes/{name}", auth(s.handleDeleteVolume))
 	mux.HandleFunc("GET /api/system", auth(s.handleSystem))

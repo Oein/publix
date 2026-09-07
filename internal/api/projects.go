@@ -34,6 +34,34 @@ type projectView struct {
 	// FrameworkName is the human label, e.g. "Next.js".
 	FrameworkName string   `json:"frameworkName,omitempty"`
 	Volumes       []string `json:"volumes,omitempty"`
+	// GeneratedHost is the <slug>.<parent> address, separated from Hosts so
+	// the dashboard can show which parent a project sits under and offer to
+	// move it. Empty when the project opted out or none is registered.
+	GeneratedHost string `json:"generatedHost,omitempty"`
+	// AppsDomainResolved is the parent actually in use, which differs from
+	// the stored choice when that choice was the server default.
+	AppsDomainResolved string `json:"appsDomainResolved,omitempty"`
+}
+
+// resolveAppsDomain validates a project's choice of parent domain.
+//
+// The empty string means "the server default" and the sentinel means "no
+// generated hostname"; anything else has to actually be registered, since
+// a typo would otherwise produce a hostname nothing resolves to.
+func (s *Server) resolveAppsDomain(want string) (string, error) {
+	want = strings.ToLower(strings.TrimSpace(want))
+	if want == "" || want == store.AppsDomainNone {
+		return want, nil
+	}
+	set := s.store.Settings()
+	if !set.HasAppsDomain(want) {
+		available := set.AppsDomainNames()
+		if len(available) == 0 {
+			return "", fmt.Errorf("no apps domain is registered on this server; add one under Settings → Domains")
+		}
+		return "", fmt.Errorf("%q is not a registered apps domain. Available: %s", want, strings.Join(available, ", "))
+	}
+	return want, nil
 }
 
 func (s *Server) view(p *store.Project) projectView {
@@ -81,6 +109,8 @@ func (s *Server) view(p *store.Project) projectView {
 		}
 	}
 	v.URL = engine.ProjectURL(&set, p, sp)
+	v.AppsDomainResolved = set.AppsDomainFor(p)
+	v.GeneratedHost = traefik.ProjectHost(p.Slug, v.AppsDomainResolved)
 	_, v.Building = s.engine.Running(p.ID)
 	return v
 }
@@ -122,6 +152,9 @@ type createProjectBody struct {
 	SpecPath   string   `json:"specPath"`
 	Domains    []string `json:"domains"`
 	AutoDeploy bool     `json:"autoDeploy"`
+	// AppsDomain picks which registered parent the generated hostname sits
+	// under. Empty takes the server default.
+	AppsDomain string `json:"appsDomain"`
 }
 
 func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
@@ -141,6 +174,14 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		SpecPath:   body.SpecPath,
 		Domains:    body.Domains,
 		AutoDeploy: body.AutoDeploy,
+	}
+	if body.AppsDomain != "" {
+		chosen, err := s.resolveAppsDomain(body.AppsDomain)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		p.AppsDomain = chosen
 	}
 	if body.Repo != "" {
 		owner, name, ok := strings.Cut(body.Repo, "/")
@@ -180,6 +221,7 @@ type updateProjectBody struct {
 	AutoDeploy  *bool     `json:"autoDeploy,omitempty"`
 	Paused      *bool     `json:"paused,omitempty"`
 	Domains     *[]string `json:"domains,omitempty"`
+	AppsDomain  *string   `json:"appsDomain,omitempty"`
 }
 
 func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
@@ -224,6 +266,13 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 			p.Domains = clean
+		}
+		if body.AppsDomain != nil {
+			chosen, err := s.resolveAppsDomain(*body.AppsDomain)
+			if err != nil {
+				return err
+			}
+			p.AppsDomain = chosen
 		}
 		return nil
 	})

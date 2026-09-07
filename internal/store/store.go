@@ -103,6 +103,23 @@ func (s *Store) normalise() {
 		set.GitHub.WebhookSecret = NewToken()
 	}
 
+	// There used to be exactly one apps domain. Carry it into the list as
+	// the default, so an existing install's generated hostnames do not move.
+	if set.LegacyAppsDomain != "" {
+		if !set.HasAppsDomain(set.LegacyAppsDomain) {
+			set.AppsDomains = append(set.AppsDomains, AppsDomain{
+				Domain: set.LegacyAppsDomain, Default: true,
+			})
+		}
+		set.LegacyAppsDomain = ""
+	}
+	// Exactly one default, always: a list where none is marked would make
+	// the default depend on registration order, which is not a decision
+	// anybody made.
+	if len(set.AppsDomains) > 0 && set.DefaultAppsDomain() == "" {
+		set.AppsDomains[0].Default = true
+	}
+
 	// Volumes gained a scope. Everything registered before that was
 	// per-project, so migrate rather than silently changing what an
 	// existing install's projects mount.

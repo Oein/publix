@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Oein/publix/internal/deployspec"
 	"github.com/Oein/publix/internal/engine"
 	"github.com/Oein/publix/internal/store"
 	"github.com/Oein/publix/internal/traefik"
@@ -18,18 +19,41 @@ import (
 // are never included: the browser has no use for them, and a value that is
 // never sent cannot be leaked by a screenshot or a browser extension.
 type settingsView struct {
-	Network           string       `json:"network"`
-	TraefikDynamicDir string       `json:"traefikDynamicDir"`
-	TraefikFile       string       `json:"traefikFile"`
-	EntryPoints       []string     `json:"entryPoints"`
-	CertResolver      string       `json:"certResolver"`
-	AppsDomain        string       `json:"appsDomain"`
-	PublicURL         string       `json:"publicUrl"`
-	WorkDir           string       `json:"workDir"`
-	KeepImages        int          `json:"keepImages"`
-	KeepDeployments   int          `json:"keepDeployments"`
-	BuildConcurrency  int          `json:"buildConcurrency"`
-	Volumes           []volumeView `json:"volumes"`
+	Network           string           `json:"network"`
+	TraefikDynamicDir string           `json:"traefikDynamicDir"`
+	TraefikFile       string           `json:"traefikFile"`
+	EntryPoints       []string         `json:"entryPoints"`
+	CertResolver      string           `json:"certResolver"`
+	AppsDomains       []appsDomainView `json:"appsDomains"`
+	Redirects         []redirectView   `json:"redirects"`
+	PublicURL         string           `json:"publicUrl"`
+	WorkDir           string           `json:"workDir"`
+	KeepImages        int              `json:"keepImages"`
+	KeepDeployments   int              `json:"keepDeployments"`
+	BuildConcurrency  int              `json:"buildConcurrency"`
+	Volumes           []volumeView     `json:"volumes"`
+}
+
+// appsDomainView annotates a registered parent domain with what is actually
+// sitting under it, so removing one is an informed decision.
+type appsDomainView struct {
+	store.AppsDomain
+	// Example is the hostname a project would get, which says more about
+	// what a parent domain is for than the domain alone does.
+	Example string   `json:"example"`
+	UsedBy  []string `json:"usedBy"`
+}
+
+// redirectView annotates a forwarding rule with what it resolves to and
+// whether anything is standing in its way.
+type redirectView struct {
+	store.Redirect
+	// Target is the absolute URL requests actually land on, which is not
+	// what was typed when a bare hostname was given.
+	Target string `json:"resolvedTarget"`
+	// Shadowed names the project serving this hostname, if one does. Such
+	// a rule is stored but never emitted: the project wins.
+	Shadowed string `json:"shadowedBy,omitempty"`
 }
 
 // volumeView annotates a registered volume with what it is being used for,
@@ -54,7 +78,8 @@ func (s *Server) settingsView() settingsView {
 		TraefikFile:       traefik.Path(&set),
 		EntryPoints:       set.EntryPoints,
 		CertResolver:      set.CertResolver,
-		AppsDomain:        set.AppsDomain,
+		AppsDomains:       []appsDomainView{},
+		Redirects:         []redirectView{},
 		PublicURL:         set.PublicURL,
 		WorkDir:           set.WorkDir,
 		KeepImages:        set.KeepImages,
@@ -63,6 +88,29 @@ func (s *Server) settingsView() settingsView {
 		Volumes:           []volumeView{},
 	}
 	projects := s.store.Projects()
+	for _, ad := range set.AppsDomains {
+		view := appsDomainView{
+			AppsDomain: ad,
+			Example:    traefik.ProjectHost("<project>", ad.Domain),
+			UsedBy:     []string{},
+		}
+		for _, p := range projects {
+			if set.AppsDomainFor(p) == ad.Domain {
+				view.UsedBy = append(view.UsedBy, p.Name)
+			}
+		}
+		v.AppsDomains = append(v.AppsDomains, view)
+	}
+	for _, rd := range set.Redirects {
+		view := redirectView{Redirect: rd, Target: rd.TargetURL()}
+		for _, p := range projects {
+			if s.projectServes(&set, p, rd.Domain) {
+				view.Shadowed = p.Name
+				break
+			}
+		}
+		v.Redirects = append(v.Redirects, view)
+	}
 	for _, sv := range set.Volumes {
 		view := volumeView{
 			Volume:  sv,
@@ -99,7 +147,6 @@ func (s *Server) handleSetSettings(w http.ResponseWriter, r *http.Request) {
 		TraefikDynamicDir *string   `json:"traefikDynamicDir,omitempty"`
 		EntryPoints       *[]string `json:"entryPoints,omitempty"`
 		CertResolver      *string   `json:"certResolver,omitempty"`
-		AppsDomain        *string   `json:"appsDomain,omitempty"`
 		PublicURL         *string   `json:"publicUrl,omitempty"`
 		WorkDir           *string   `json:"workDir,omitempty"`
 		KeepImages        *int      `json:"keepImages,omitempty"`
@@ -139,14 +186,6 @@ func (s *Server) handleSetSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.CertResolver != nil {
 			set.CertResolver = strings.TrimSpace(*body.CertResolver)
-		}
-		if body.AppsDomain != nil {
-			d := strings.ToLower(strings.TrimSpace(*body.AppsDomain))
-			d = strings.TrimPrefix(strings.TrimPrefix(d, "*."), ".")
-			if d != "" && !strings.Contains(d, ".") {
-				return fmt.Errorf("%q does not look like a domain", d)
-			}
-			set.AppsDomain = d
 		}
 		if body.PublicURL != nil {
 			u := strings.TrimSuffix(strings.TrimSpace(*body.PublicURL), "/")
@@ -375,4 +414,256 @@ func isWritableDir(dir string) bool {
 	f.Close()
 	os.Remove(name)
 	return true
+}
+
+// handleAddAppsDomain registers a wildcard parent domain.
+func (s *Server) handleAddAppsDomain(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Domain      string `json:"domain"`
+		Description string `json:"description"`
+		Default     bool   `json:"default"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	domain, err := store.NormaliseAppsDomain(body.Domain)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if err := s.store.SetSettings(func(set *store.Settings) error {
+		if set.HasAppsDomain(domain) {
+			return fmt.Errorf("%s is already registered", domain)
+		}
+		// The first one registered is the default whether or not the
+		// caller asked: a list with no default would make every project's
+		// address depend on registration order.
+		makeDefault := body.Default || len(set.AppsDomains) == 0
+		if makeDefault {
+			for i := range set.AppsDomains {
+				set.AppsDomains[i].Default = false
+			}
+		}
+		set.AppsDomains = append(set.AppsDomains, store.AppsDomain{
+			Domain:      domain,
+			Description: strings.TrimSpace(body.Description),
+			Default:     makeDefault,
+		})
+		return nil
+	}); err != nil {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
+	if err := s.engine.ReconcileRouting(); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, s.settingsView())
+}
+
+// handleSetDefaultAppsDomain moves the default to another registered domain.
+func (s *Server) handleSetDefaultAppsDomain(w http.ResponseWriter, r *http.Request) {
+	domain := strings.ToLower(strings.TrimSpace(r.PathValue("domain")))
+	if err := s.store.SetSettings(func(set *store.Settings) error {
+		if !set.HasAppsDomain(domain) {
+			return fmt.Errorf("%s is not registered", domain)
+		}
+		for i := range set.AppsDomains {
+			set.AppsDomains[i].Default = strings.EqualFold(set.AppsDomains[i].Domain, domain)
+		}
+		return nil
+	}); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	// Every project that had no explicit choice just moved. Rewrite the
+	// routing rather than waiting for each one to redeploy.
+	if err := s.engine.ReconcileRouting(); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.settingsView())
+}
+
+// handleDeleteAppsDomain unregisters a parent domain.
+//
+// Projects that named it keep the setting but fall back to the default, so
+// unregistering never leaves a project unreachable. The response says which
+// ones moved.
+func (s *Server) handleDeleteAppsDomain(w http.ResponseWriter, r *http.Request) {
+	domain := strings.ToLower(strings.TrimSpace(r.PathValue("domain")))
+
+	if err := s.store.SetSettings(func(set *store.Settings) error {
+		if !set.HasAppsDomain(domain) {
+			return fmt.Errorf("%s is not registered", domain)
+		}
+		wasDefault := false
+		out := set.AppsDomains[:0]
+		for _, d := range set.AppsDomains {
+			if strings.EqualFold(d.Domain, domain) {
+				wasDefault = d.Default
+				continue
+			}
+			out = append(out, d)
+		}
+		set.AppsDomains = out
+		if wasDefault && len(set.AppsDomains) > 0 {
+			set.AppsDomains[0].Default = true
+		}
+		return nil
+	}); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.engine.ReconcileRouting(); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.settingsView())
+}
+
+// projectServes reports whether a project already answers on a hostname,
+// which is what makes a forwarding rule for it dead configuration.
+func (s *Server) projectServes(set *store.Settings, p *store.Project, domain string) bool {
+	var sp *deployspec.Spec
+	if live := p.LiveDeployment(); live != nil {
+		if parsed, err := parseSpec(live.Spec); err == nil {
+			sp = parsed
+		}
+	}
+	for _, r := range traefik.Hosts(set, p, sp) {
+		if strings.EqualFold(r.Domain, domain) {
+			return true
+		}
+	}
+	return false
+}
+
+// redirectBody is a forwarding rule as the dashboard sends it.
+type redirectBody struct {
+	Domain      string `json:"domain"`
+	Path        string `json:"path"`
+	Target      string `json:"target"`
+	KeepPath    *bool  `json:"keepPath"`
+	Permanent   bool   `json:"permanent"`
+	Description string `json:"description"`
+}
+
+func (b redirectBody) toRedirect() store.Redirect {
+	path := strings.TrimSpace(b.Path)
+	if path == "/" {
+		path = ""
+	}
+	return store.Redirect{
+		Domain:      strings.ToLower(strings.Trim(strings.TrimSpace(b.Domain), ".")),
+		Path:        path,
+		Target:      strings.TrimSpace(b.Target),
+		KeepPath:    b.KeepPath,
+		Permanent:   b.Permanent,
+		Description: strings.TrimSpace(b.Description),
+	}
+}
+
+// handleAddRedirect registers a forwarding rule.
+func (s *Server) handleAddRedirect(w http.ResponseWriter, r *http.Request) {
+	var body redirectBody
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	rd := body.toRedirect()
+
+	// A rule for a hostname a project serves would never take effect, so
+	// refusing it here is kinder than storing something inert.
+	set := s.store.Settings()
+	for _, p := range s.store.Projects() {
+		if s.projectServes(&set, p, rd.Domain) {
+			writeError(w, http.StatusConflict,
+				fmt.Errorf("%s is served by the project %q, so forwarding it would never take effect", rd.Domain, p.Name))
+			return
+		}
+	}
+
+	if err := s.store.SetSettings(func(set *store.Settings) error {
+		if err := set.ValidateRedirect(rd, ""); err != nil {
+			return err
+		}
+		set.Redirects = append(set.Redirects, rd)
+		return nil
+	}); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.engine.ReconcileRouting(); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, s.settingsView())
+}
+
+// handleUpdateRedirect replaces a rule in place, keyed by its source.
+func (s *Server) handleUpdateRedirect(w http.ResponseWriter, r *http.Request) {
+	source := strings.ToLower(strings.TrimSpace(r.PathValue("domain")))
+	var body redirectBody
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	rd := body.toRedirect()
+	if rd.Domain == "" {
+		rd.Domain = source
+	}
+
+	if err := s.store.SetSettings(func(set *store.Settings) error {
+		if err := set.ValidateRedirect(rd, source); err != nil {
+			return err
+		}
+		for i, existing := range set.Redirects {
+			if strings.EqualFold(existing.Domain, source) {
+				set.Redirects[i] = rd
+				return nil
+			}
+		}
+		return fmt.Errorf("%s is not forwarded", source)
+	}); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.engine.ReconcileRouting(); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.settingsView())
+}
+
+// handleDeleteRedirect removes a forwarding rule.
+func (s *Server) handleDeleteRedirect(w http.ResponseWriter, r *http.Request) {
+	domain := strings.ToLower(strings.TrimSpace(r.PathValue("domain")))
+	if err := s.store.SetSettings(func(set *store.Settings) error {
+		out := set.Redirects[:0]
+		found := false
+		for _, rd := range set.Redirects {
+			if strings.EqualFold(rd.Domain, domain) {
+				found = true
+				continue
+			}
+			out = append(out, rd)
+		}
+		if !found {
+			return fmt.Errorf("%s is not forwarded", domain)
+		}
+		set.Redirects = out
+		return nil
+	}); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.engine.ReconcileRouting(); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.settingsView())
 }

@@ -5,6 +5,7 @@
 // something happened and can no longer find out what.
 
 import { writable } from './reactive.js';
+import { t } from './i18n.svelte.js';
 
 export const toasts = writable([]);
 
@@ -28,6 +29,6 @@ export const notify = {
   info: (message) => push('info', message),
   error: (err) => {
     if (typeof err === 'string') return push('error', err);
-    return push('error', err?.message ?? 'Something went wrong', err?.details ?? []);
+    return push('error', err?.message ?? t('common.wentWrong'), err?.details ?? []);
   },
 };

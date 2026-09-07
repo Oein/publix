@@ -67,7 +67,7 @@ func newHarness(t *testing.T) *harness {
 		s.Network = network
 		s.TraefikDynamicDir = traefikDir
 		s.WorkDir = filepath.Join(home, "work")
-		s.AppsDomain = "test.local"
+		s.AppsDomains = []store.AppsDomain{{Domain: "test.local", Default: true}}
 		s.CertResolver = "" // no ACME in a test
 		s.KeepImages = 2
 		return nil

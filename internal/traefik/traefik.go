@@ -131,6 +131,10 @@ type Meta struct {
 	Branch     string
 	Kind       string
 	Created    string
+	// AppsDomain is the parent this project's generated hostnames sit
+	// under. It comes from the project rather than the settings, because
+	// two projects on one server can sit under different parents.
+	AppsDomain string
 }
 
 // BaseLabels are publix's own bookkeeping labels.
@@ -188,7 +192,7 @@ func RouterLabels(set *store.Settings, sp *deployspec.Spec, m Meta) map[string]s
 		l[base+"timeout"] = sp.Health.Timeout.D().String()
 	}
 
-	host := DeploymentHost(m.Slug, m.Deployment, set.AppsDomain)
+	host := DeploymentHost(m.Slug, m.Deployment, m.AppsDomain)
 	if host == "" {
 		return l
 	}

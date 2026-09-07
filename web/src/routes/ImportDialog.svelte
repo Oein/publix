@@ -18,6 +18,9 @@
   let { repo, onclose, onimported } = $props();
 
   let inspection = $state(null);
+  // The parent domains registered on this server, so importing is where
+  // someone picks where the thing will actually live.
+  let appsDomains = $state([]);
   let inspectError = $state('');
   let importing = $state(false);
 
@@ -29,6 +32,7 @@
   /* svelte-ignore state_referenced_locally */
   let branch = $state(repo.default_branch || 'main');
   let rootDir = $state('');
+  let appsDomain = $state('');
   let domains = $state('');
   let autoDeploy = $state(true);
   let deployNow = $state(true);
@@ -56,6 +60,30 @@
     inspect();
   });
 
+  $effect(() => {
+    api.settings
+      .get()
+      .then((s) => (appsDomains = s.appsDomains ?? []))
+      .catch(() => (appsDomains = []));
+  });
+
+  const defaultAppsDomain = $derived(
+    appsDomains.find((d) => d.default)?.domain ?? appsDomains[0]?.domain ?? ''
+  );
+  // What the project's address will be, resolved the same way the server
+  // resolves it, so the dialog is not promising something different.
+  const generatedHost = $derived.by(() => {
+    const parent = appsDomain === 'none' ? '' : appsDomain || defaultAppsDomain;
+    if (!parent) return '';
+    const slug =
+      name
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '') || 'project';
+    return `${slug}.${parent}`;
+  });
+
   async function submit() {
     importing = true;
     try {
@@ -69,6 +97,7 @@
           .split(/[\s,]+/)
           .map((d) => d.trim())
           .filter(Boolean),
+        appsDomain,
         autoDeploy,
         deploy: deployNow,
         writeSpec: writeSpec && !inspection?.hasSpec,
@@ -193,6 +222,31 @@
       </Field>
     </div>
 
+    {#if appsDomains.length > 0}
+      <Field label={t('id.appsDomain')} hint={t('id.appsDomainHint')}>
+        {#snippet children(id)}
+          <select {id} bind:value={appsDomain}>
+            <option value="">
+              {t('id.appsDomainDefault', { domain: defaultAppsDomain })}
+            </option>
+            {#each appsDomains as d}
+              {#if d.domain !== defaultAppsDomain}
+                <option value={d.domain}>{d.domain}</option>
+              {/if}
+            {/each}
+            <option value="none">{t('id.appsDomainNone')}</option>
+          </select>
+        {/snippet}
+      </Field>
+      <p class="address small">
+        {#if generatedHost}
+          {t('id.willBeAt')} <code>{generatedHost}</code>
+        {:else}
+          {t('id.noGeneratedHost')}
+        {/if}
+      </p>
+    {/if}
+
     <label class="check">
       <input type="checkbox" bind:checked={autoDeploy} />
       <span>
@@ -298,6 +352,10 @@
   .bad { background: var(--bad-bg); border-color: var(--bad); }
 
   .form { display: flex; flex-direction: column; gap: 14px; }
+
+  /* Sits directly under the picker it explains, so it must not inherit the
+     form's gap and float away from it. */
+  .address { margin: -8px 0 0; color: var(--text-muted); }
 
   .two {
     display: grid;

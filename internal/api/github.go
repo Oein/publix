@@ -342,13 +342,17 @@ func (s *Server) handleInspectRepo(w http.ResponseWriter, r *http.Request) {
 // webhook, and start the first deploy.
 func (s *Server) handleImportRepo(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Owner      string   `json:"owner"`
-		Repo       string   `json:"repo"`
-		Branch     string   `json:"branch"`
-		Name       string   `json:"name"`
-		RootDir    string   `json:"rootDir"`
-		Domains    []string `json:"domains"`
-		AutoDeploy *bool    `json:"autoDeploy"`
+		Owner   string   `json:"owner"`
+		Repo    string   `json:"repo"`
+		Branch  string   `json:"branch"`
+		Name    string   `json:"name"`
+		RootDir string   `json:"rootDir"`
+		Domains []string `json:"domains"`
+		// AppsDomain picks which registered parent the project's generated
+		// hostname sits under, chosen at import because that is when
+		// someone is looking at where this thing should live.
+		AppsDomain string `json:"appsDomain"`
+		AutoDeploy *bool  `json:"autoDeploy"`
 		// WriteSpec commits the suggested deployment.yaml to the repo.
 		WriteSpec bool   `json:"writeSpec"`
 		Spec      string `json:"spec"`
@@ -389,12 +393,18 @@ func (s *Server) handleImportRepo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	appsDomain, err := s.resolveAppsDomain(body.AppsDomain)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 
 	p := &store.Project{
 		Name:        firstNonEmpty(strings.TrimSpace(body.Name), repo.Name),
 		Description: repo.Description,
 		RootDir:     strings.Trim(body.RootDir, "/"),
 		Domains:     domains,
+		AppsDomain:  appsDomain,
 		AutoDeploy:  body.AutoDeploy == nil || *body.AutoDeploy,
 		Repo: &store.Repo{
 			Owner:    repo.Owner,

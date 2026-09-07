@@ -31,6 +31,10 @@
   let readOnly = $state(false);
   let create = $state(true);
   let saving = $state(false);
+  // The server is the authority on what a volume may point at, and its
+  // refusal belongs next to the field that caused it rather than in a
+  // toast in the corner while the form is still open.
+  let addError = $state(null);
 
   const projectVolumes = $derived((settings?.volumes ?? []).filter((v) => v.scope !== 'shared'));
   const sharedVolumes = $derived((settings?.volumes ?? []).filter((v) => v.scope === 'shared'));
@@ -55,11 +59,13 @@
     description = '';
     readOnly = false;
     create = true;
+    addError = null;
     adding = true;
   }
 
   async function add() {
     saving = true;
+    addError = null;
     try {
       settings = await api.settings.addVolume({
         name: name.trim(),
@@ -72,7 +78,9 @@
       notify.success(t('vol.registered', { name: name.trim() }));
       adding = false;
     } catch (err) {
-      notify.error(err);
+      // The server answers with a headline and a line per broken rule, and
+      // the rules are the part that says what to change.
+      addError = { message: err.message, details: err.details ?? [] };
     } finally {
       saving = false;
     }
@@ -89,60 +97,59 @@
   }
 </script>
 
-{#snippet volumeRow(vol)}
-  <li>
-    <div class="grow">
-      <div class="row wrap">
-        <code class="vname">{vol.name}</code>
-        {#if vol.readOnly}<Badge tone="muted">{t('vol.readOnly')}</Badge>{/if}
-        {#if vol.error}<Badge tone="bad">{vol.error}</Badge>{/if}
-      </div>
-      <div class="paths small">
-        <span class="faint">{t('vol.host')}</span>
-        <code>{vol.example}</code>
-        <span class="faint">→</span>
-        <code>{vol.mount}</code>
-      </div>
-      {#if vol.description}<p class="muted small desc">{vol.description}</p>{/if}
-      <div class="small faint used">
-        {#if vol.usedBy.length}
-          {t('vol.usedBy', { list: vol.usedBy.join(', ') })}
-        {:else}
-          {t('vol.notUsed')}
-        {/if}
-      </div>
-    </div>
-    <Button size="sm" variant="danger" onclick={() => (removing = vol)}>
-      {t('vol.unregister')}
-    </Button>
-  </li>
+{#snippet volumeTable(rows)}
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>{t('vol.name')}</th>
+          <th>{t('vol.colHost')}</th>
+          <th>{t('vol.colMount')}</th>
+          <th>{t('domainsPage.colProjects')}</th>
+          <th class="actions"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {#each rows as vol (vol.name)}
+          <tr>
+            <td>
+              <div class="cell">
+                <code>{vol.name}</code>
+                {#if vol.readOnly}<Badge tone="muted">{t('vol.readOnly')}</Badge>{/if}
+                {#if vol.error}<Badge tone="bad">{vol.error}</Badge>{/if}
+              </div>
+              {#if vol.description}<div class="sub">{vol.description}</div>{/if}
+            </td>
+            <td class="faint mono">{vol.example}</td>
+            <td class="faint mono">{vol.mount}</td>
+            <td>
+              {#if vol.usedBy.length}
+                <span class="truncate" title={vol.usedBy.join(', ')}>{vol.usedBy.join(', ')}</span>
+              {:else}
+                <span class="faint">—</span>
+              {/if}
+            </td>
+            <td class="actions">
+              <Button size="sm" variant="danger" onclick={() => (removing = vol)}>
+                {t('vol.unregister')}
+              </Button>
+            </td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  </div>
 {/snippet}
 
-<Card title={t('vol.projectTitle')} description={t('vol.projectDesc')}>
+<Card title={t('vol.projectTitle')} description={t('vol.projectDesc')} flush>
   {#snippet actions()}
     <Button size="sm" variant="primary" onclick={() => openAdd('project')}>
       {t('vol.register')}
     </Button>
   {/snippet}
 
-  <div class="explain">
-    <p class="small">
-      {#each tparts('vol.projectExplain') as part}{#if part.slot === 'byName'}<em
-          >{t('vol.byName')}</em
-        >{:else if part.slot === 'file'}<code>deployment.yaml</code
-        >{:else if part.slot === 'hostPath'}<code class="path"
-          >{t('vol.tokenHostPath')}/{t('vol.tokenProjectId')}</code
-        >{:else if part.slot === 'mount'}<code>/shared/{t('vol.tokenName')}</code
-        >{:else}{part.text}{/if}{/each}
-    </p>
-    <p class="small muted">
-      {#each tparts('vol.projectExplainNote') as part}{#if part.slot}<code>disk0</code
-        >{:else}{part.text}{/if}{/each}
-    </p>
-  </div>
-
   {#if settings === null}
-    <p class="muted small">{t('common.loading')}</p>
+    <p class="pad muted small">{t('common.loading')}</p>
   {:else if projectVolumes.length === 0}
     <Empty title={t('vol.noProjectTitle')} description={t('vol.noProjectDesc')}>
       <Button variant="primary" onclick={() => openAdd('project')}>
@@ -150,37 +157,23 @@
       </Button>
     </Empty>
   {:else}
-    <ul class="vols">
-      {#each projectVolumes as vol (vol.name)}{@render volumeRow(vol)}{/each}
-    </ul>
+    {@render volumeTable(projectVolumes)}
   {/if}
 </Card>
 
-<Card title={t('vol.sharedTitle')} description={t('vol.sharedDesc')}>
+<Card title={t('vol.sharedTitle')} description={t('vol.sharedDesc')} flush>
   {#snippet actions()}
     <Button size="sm" onclick={() => openAdd('shared')}>{t('vol.register')}</Button>
   {/snippet}
 
-  <div class="explain warn">
-    <p class="small">
-      {#each tparts('vol.sharedExplain') as part}{#if part.slot === 'same'}<em
-          >{t('vol.same')}</em
-        >{:else if part.slot === 'hostPath'}<code class="path">{t('vol.tokenHostPath')}</code
-        >{:else}{part.text}{/if}{/each}
-    </p>
-    <p class="small muted">{t('vol.sharedExplainNote')}</p>
-  </div>
-
   {#if settings === null}
-    <p class="muted small">{t('common.loading')}</p>
+    <p class="pad muted small">{t('common.loading')}</p>
   {:else if sharedVolumes.length === 0}
     <Empty title={t('vol.noSharedTitle')} description={t('vol.noSharedDesc')}>
       <Button onclick={() => openAdd('shared')}>{t('vol.registerAShared')}</Button>
     </Empty>
   {:else}
-    <ul class="vols">
-      {#each sharedVolumes as vol (vol.name)}{@render volumeRow(vol)}{/each}
-    </ul>
+    {@render volumeTable(sharedVolumes)}
   {/if}
 </Card>
 
@@ -244,7 +237,22 @@
         </span>
       </label>
 
-      {#if name.trim() && path.trim()}
+      {#if addError}
+        <div class="failed small" role="alert">
+          <strong>{t('vol.rejected')}</strong>
+          {#if addError.details.length}
+            <ul>
+              {#each addError.details as detail}<li>{detail}</li>{/each}
+            </ul>
+          {:else}
+            <p>{addError.message}</p>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- The preview describes what registering would do, so it must not
+           keep promising that after the server refused. -->
+      {#if !addError && name.trim() && path.trim()}
         <div class="preview small" class:sharedPreview={scope === 'shared'}>
           {#if scope === 'shared'}
             {#each tparts('vol.previewShared') as part}{#if part.slot === 'every'}<strong
@@ -284,49 +292,62 @@
 {/if}
 
 <style>
-  .explain {
-    padding: 11px 13px;
-    margin-bottom: 14px;
-    background: var(--bg-sunken);
-    border-radius: var(--radius-sm);
-    border-left: 3px solid var(--accent);
-  }
-  /* A shared volume trades away isolation, so its explanation is marked
-     as the caution it is rather than reading like the other one. */
-  .explain.warn { border-left-color: var(--warn); background: var(--warn-bg); }
-  .explain p { margin: 0 0 6px; line-height: 1.55; }
-  .explain p:last-child { margin-bottom: 0; }
-
-  .vols { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-  .vols li {
+  .cell {
     display: flex;
-    align-items: flex-start;
-    gap: 14px;
-    padding: 11px 13px;
-    background: var(--bg-sunken);
-    border-radius: var(--radius-sm);
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
   }
 
-  .vname { font-size: 13px; font-weight: 600; }
-  .paths { display: flex; align-items: center; gap: 6px; margin-top: 5px; flex-wrap: wrap; }
-  .desc { margin: 5px 0 0; }
-  .used { margin-top: 4px; }
+  /* A name is an identifier, not prose: it may not be broken mid-word to
+     make room for the long paths beside it. Those wrap instead. */
+  .cell code {
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+
+  .sub {
+    margin-top: 2px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .pad { padding: 16px; }
 
   code {
     padding: 1px 5px;
-    background: var(--bg-raised);
+    background: var(--bg-sunken);
     border-radius: 3px;
     font-family: var(--mono);
-    font-size: 11.5px;
+    font-size: 12px;
+    overflow-wrap: anywhere;
   }
-  .explain code { background: var(--bg-raised); }
 
   .form { display: flex; flex-direction: column; gap: 14px; }
+
+  .failed {
+    padding: 9px 11px;
+    background: var(--bad-bg);
+    border-left: 3px solid var(--bad);
+    border-radius: var(--radius-sm);
+  }
+  .failed strong { display: block; margin-bottom: 3px; }
+  .failed p { margin: 0; white-space: pre-line; line-height: 1.5; }
+  /* One line per rule the registration broke, which is what says what to
+     change. Word-break because the offending value is usually a long path. */
+  .failed ul {
+    margin: 0;
+    padding-left: 17px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
 
   .check { display: flex; align-items: flex-start; gap: 9px; cursor: pointer; font-size: 13px; }
   .check input { margin-top: 2px; flex: none; }
   .check span { display: flex; flex-direction: column; gap: 1px; }
 
+  /* The preview is the isolation model made concrete, so a shared volume's
+     is coloured as the caution it is rather than matching the other one. */
   .preview {
     padding: 9px 11px;
     background: var(--accent-bg);
