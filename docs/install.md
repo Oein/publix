@@ -305,6 +305,20 @@ sudo git fetch origin && sudo git checkout -B some-branch origin/some-branch
 sudo ./scripts/install.sh --email you@example.com
 ```
 
+### Did the upgrade land?
+
+**Settings → Server** shows the commit publix is running, stamped into the
+image at build time. Compare it with what the checkout is on:
+
+```bash
+git -C /opt/publix log --oneline -1
+```
+
+If those disagree, the image was not rebuilt from the checkout. If they
+agree but the dashboard looks unchanged, the container is still the old
+one — `docker compose -f deploy/docker-compose.yml up -d` recreates it when
+the image changed, and `docker compose ps` shows when it last started.
+
 Your projects, settings and secrets live in `/var/lib/publix` and are
 untouched by an upgrade. Running containers keep serving while the new image
 builds; only publix itself restarts, and on startup it rewrites Traefik's

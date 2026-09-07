@@ -249,6 +249,14 @@ fi
 
 step "Building publix (this takes a few minutes the first time)"
 cd "$INSTALL_DIR"
+
+# Stamp the build with the commit it came from. Without this every
+# containerised build reports "docker", and an operator upgrading has no way
+# to tell whether the version they are looking at is the one they just
+# built. The dashboard shows this under Settings -> Server.
+PUBLIX_VERSION="$(git -C "$INSTALL_DIR" describe --tags --always --dirty 2>/dev/null || echo docker)"
+export PUBLIX_VERSION
+
 if ! docker compose -f deploy/docker-compose.yml build --pull; then
   cat >&2 <<HINT
 
@@ -286,6 +294,10 @@ fi
 # --- done --------------------------------------------------------------------
 
 printf '\n%s✓ publix is running%s\n\n' "$GREEN$BOLD" "$RESET"
+
+printf '  Version     %s%s%s\n' "$BOLD" "$PUBLIX_VERSION" "$RESET"
+printf '              %sshown under Settings → Server, so you can confirm an upgrade landed%s\n\n' \
+  "$DIM" "$RESET"
 
 if [ -n "$DASHBOARD_DOMAIN" ]; then
   printf '  Dashboard   %shttps://%s%s\n' "$BOLD" "$DASHBOARD_DOMAIN" "$RESET"

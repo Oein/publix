@@ -377,6 +377,7 @@ export default {
 
   'server.status': 'Status',
   'server.docker': 'Docker',
+  'server.publixVersion': 'publix',
   'server.unreachable': 'unreachable',
   'server.traefikConfig': 'Traefik config',
   'server.writable': 'writable',

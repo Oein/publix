@@ -68,6 +68,13 @@
 {#if system}
   <Card title={t('server.status')}>
     <div class="status">
+      <!-- First, because "which build am I looking at" is the question an
+           upgrade raises, and nothing else on this page answers it. -->
+      <div class="item">
+        <span class="small muted">{t('server.publixVersion')}</span>
+        <code class="small">{system.version}</code>
+      </div>
+
       <div class="item">
         <span class="small muted">{t('server.docker')}</span>
         {#if system.docker?.ok}

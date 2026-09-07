@@ -367,6 +367,7 @@ export default {
 
   'server.status': '상태',
   'server.docker': 'Docker',
+  'server.publixVersion': 'publix',
   'server.unreachable': '연결 불가',
   'server.traefikConfig': 'Traefik 설정',
   'server.writable': '쓰기 가능',
