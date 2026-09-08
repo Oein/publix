@@ -68,6 +68,9 @@ type Viewer struct {
 	Name      string `json:"name"`
 	AvatarURL string `json:"avatar_url"`
 	Type      string `json:"type"`
+	// Accounts lists every account an App is installed on. A personal
+	// access token leaves it empty: it is one account by construction.
+	Accounts []string `json:"accounts,omitempty"`
 }
 
 // Whoami identifies the credentials in use, which is what the settings page
@@ -79,16 +82,20 @@ type Viewer struct {
 // an organisation is the most common way to end up connected and still see
 // nothing.
 func (c *Client) Whoami(ctx context.Context) (*Viewer, error) {
-	if inst, isApp, err := c.CurrentInstallation(ctx); isApp {
+	if insts, isApp, err := c.Installations(ctx); isApp {
 		if err != nil {
 			return nil, err
 		}
-		return &Viewer{
-			Login:     inst.Account.Login,
-			Name:      inst.Account.Login,
-			AvatarURL: inst.Account.AvatarURL,
+		v := &Viewer{
+			Login:     insts[0].Account.Login,
+			Name:      insts[0].Account.Login,
+			AvatarURL: insts[0].Account.AvatarURL,
 			Type:      "Installation",
-		}, nil
+		}
+		for _, i := range insts {
+			v.Accounts = append(v.Accounts, i.Account.Login)
+		}
+		return v, nil
 	}
 	var v Viewer
 	if _, err := c.do(ctx, http.MethodGet, "/user", nil, &v); err != nil {
@@ -129,14 +136,52 @@ func (c *Client) listUserRepos(ctx context.Context) ([]Repo, error) {
 	return sortRepos(out), nil
 }
 
+// listInstallationRepos collects the repositories of every installation
+// the App has, not just one.
+//
+// Someone who installed the App on their personal account and two
+// organisations means all three: showing one account's repositories and
+// calling that the list would hide the rest with no way to tell.
 func (c *Client) listInstallationRepos(ctx context.Context) ([]Repo, error) {
+	insts, _, err := c.Installations(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []Repo
+	seen := map[int64]bool{}
+	var failures []string
+	for _, inst := range insts {
+		repos, err := c.installationRepos(ctx, inst.Account.Login)
+		if err != nil {
+			// One account being unreadable — its installation suspended,
+			// say — must not blank out the others.
+			failures = append(failures, fmt.Sprintf("%s: %v", inst.Account.Login, err))
+			continue
+		}
+		for _, r := range repos {
+			if seen[r.ID] {
+				continue
+			}
+			seen[r.ID] = true
+			out = append(out, r)
+		}
+	}
+	if len(out) == 0 && len(failures) > 0 {
+		return nil, fmt.Errorf("no repositories could be listed — %s", strings.Join(failures, "; "))
+	}
+	return sortRepos(out), nil
+}
+
+// installationRepos lists one installation's repositories, addressed by the
+// account it is on.
+func (c *Client) installationRepos(ctx context.Context, owner string) ([]Repo, error) {
 	var out []Repo
 	for page := 1; page <= 10; page++ {
 		var batch struct {
 			Repositories []rawRepo `json:"repositories"`
 		}
 		path := fmt.Sprintf("/installation/repositories?per_page=100&page=%d", page)
-		if _, err := c.do(ctx, http.MethodGet, path, nil, &batch); err != nil {
+		if _, err := c.doAs(ctx, owner, http.MethodGet, path, nil, &batch); err != nil {
 			return nil, err
 		}
 		for _, r := range batch.Repositories {
@@ -146,7 +191,7 @@ func (c *Client) listInstallationRepos(ctx context.Context) ([]Repo, error) {
 			break
 		}
 	}
-	return sortRepos(out), nil
+	return out, nil
 }
 
 // sortRepos puts the most recently pushed first, which is nearly always the
@@ -374,11 +419,14 @@ func (c *Client) GetCommit(ctx context.Context, owner, name, ref string) (*Commi
 // AuthenticateCloneURL embeds credentials into an HTTPS clone URL so git can
 // fetch a private repository without an interactive prompt.
 func (c *Client) AuthenticateCloneURL(ctx context.Context, cloneURL string) (string, error) {
-	tok, err := c.auth.token(ctx, c)
+	u, err := url.Parse(cloneURL)
 	if err != nil {
 		return "", err
 	}
-	u, err := url.Parse(cloneURL)
+	// The owner decides which App installation can read this repository,
+	// and it is right there in the URL: /owner/repo.git.
+	owner, _, _ := strings.Cut(strings.TrimPrefix(u.Path, "/"), "/")
+	tok, err := c.auth.token(ctx, c, owner)
 	if err != nil {
 		return "", err
 	}

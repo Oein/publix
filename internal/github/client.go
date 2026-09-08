@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,8 +44,14 @@ type Client struct {
 }
 
 // authenticator supplies the Authorization header for each request.
+//
+// owner is the account whose repositories the request is about, or empty
+// when the call is not repository-scoped. A personal access token ignores
+// it; a GitHub App uses it to pick which of its installations to act as,
+// since an App installed on three accounts holds three separate tokens and
+// only one of them can see any given repository.
 type authenticator interface {
-	token(ctx context.Context, c *Client) (string, error)
+	token(ctx context.Context, c *Client, owner string) (string, error)
 	scheme() string
 }
 
@@ -62,7 +69,7 @@ func New(set store.GitHubSettings) (*Client, error) {
 		if err != nil {
 			return nil, err
 		}
-		c.auth = &appAuth{appID: set.AppID, installationID: set.InstallationID, key: key}
+		c.auth = &appAuth{appID: set.AppID, pinned: set.InstallationID, key: key}
 	case set.Token != "":
 		c.auth = &tokenAuth{pat: set.Token}
 	default:
@@ -77,43 +84,57 @@ var ErrNotConfigured = fmt.Errorf("GitHub is not connected: add a personal acces
 // tokenAuth authenticates with a personal access token.
 type tokenAuth struct{ pat string }
 
-func (a *tokenAuth) token(context.Context, *Client) (string, error) { return a.pat, nil }
-func (a *tokenAuth) scheme() string                                 { return "Bearer" }
+func (a *tokenAuth) token(context.Context, *Client, string) (string, error) { return a.pat, nil }
+func (a *tokenAuth) scheme() string                                         { return "Bearer" }
 
 // appAuth authenticates as a GitHub App installation, minting and caching
 // installation tokens as they expire.
+//
+// An App can be installed on several accounts at once, and each
+// installation is a separate credential that only sees that account's
+// repositories. So this holds a token per installation and picks between
+// them by the account a request is about, rather than treating "the
+// installation" as a single thing.
 type appAuth struct {
-	appID          string
-	installationID string
-	key            *rsa.PrivateKey
+	appID string
+	// pinned is the installation ID an operator set by hand. Empty means
+	// every installation the App has, which is what someone who installed
+	// it on their personal account and two organisations expects.
+	pinned string
+	key    *rsa.PrivateKey
 
-	mu      sync.Mutex
-	cached  string
+	mu       sync.Mutex
+	installs []Installation
+	tokens   map[string]*cachedToken
+}
+
+type cachedToken struct {
+	token   string
 	expires time.Time
 }
 
 func (a *appAuth) scheme() string { return "Bearer" }
 
-func (a *appAuth) token(ctx context.Context, c *Client) (string, error) {
+func (a *appAuth) token(ctx context.Context, c *Client, owner string) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	id, err := a.installationFor(ctx, c, owner)
+	if err != nil {
+		return "", err
+	}
 	// Refresh a minute early: a token that expires mid-request produces a
 	// confusing 401 on an operation that had nothing wrong with it.
-	if a.cached != "" && time.Now().Before(a.expires.Add(-time.Minute)) {
-		return a.cached, nil
+	if tok := a.tokens[id]; tok != nil && time.Now().Before(tok.expires.Add(-time.Minute)) {
+		return tok.token, nil
 	}
 
 	jwt, err := a.appJWT()
 	if err != nil {
 		return "", err
 	}
-	installation, err := a.resolve(ctx, c, jwt)
-	if err != nil {
-		return "", err
-	}
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		fmt.Sprintf("%s/app/installations/%s/access_tokens", c.base, url.PathEscape(installation)), nil)
+		fmt.Sprintf("%s/app/installations/%s/access_tokens", c.base, url.PathEscape(id)), nil)
 	if err != nil {
 		return "", err
 	}
@@ -135,69 +156,112 @@ func (a *appAuth) token(ctx context.Context, c *Client) (string, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return "", err
 	}
-	a.cached, a.expires = out.Token, out.ExpiresAt
-	return a.cached, nil
+	if a.tokens == nil {
+		a.tokens = map[string]*cachedToken{}
+	}
+	a.tokens[id] = &cachedToken{token: out.Token, expires: out.ExpiresAt}
+	return out.Token, nil
 }
 
-// resolve returns the installation to act as, discovering it when the
-// operator did not paste one. The result is remembered: it cannot change
-// for a given App ID, and re-listing installations on every token refresh
-// spends a request for nothing.
+// installationFor picks which installation a request belongs to.
 //
-// The caller must hold a.mu, since this writes the remembered value.
-func (a *appAuth) resolve(ctx context.Context, c *Client, jwt string) (string, error) {
-	if a.installationID != "" {
-		return a.installationID, nil
+// The caller must hold a.mu.
+func (a *appAuth) installationFor(ctx context.Context, c *Client, owner string) (string, error) {
+	if a.pinned != "" {
+		return a.pinned, nil
 	}
-	found, err := a.discoverInstallation(ctx, c, jwt)
+	insts, err := a.list(ctx, c)
 	if err != nil {
 		return "", err
 	}
-	a.installationID = found
-	return found, nil
+	if owner != "" {
+		for _, inst := range insts {
+			if strings.EqualFold(inst.Account.Login, owner) {
+				return strconv.FormatInt(inst.ID, 10), nil
+			}
+		}
+		return "", fmt.Errorf("the GitHub App is not installed on %q; it is installed on %s", owner, accountList(insts))
+	}
+	if len(insts) == 1 {
+		return strconv.FormatInt(insts[0].ID, 10), nil
+	}
+	// Every repository-scoped call carries an owner, so this is only
+	// reachable for a call that is about no account in particular. There
+	// is no right answer, and guessing would silently show one account's
+	// world as if it were everything.
+	return "", fmt.Errorf("this GitHub App is installed on %d accounts (%s); this request is not about any one of them",
+		len(insts), accountList(insts))
 }
 
-// discoverInstallation finds the App's single installation, so an operator
-// who pasted an App ID and key does not also have to hunt for the numeric
-// installation ID.
-func (a *appAuth) discoverInstallation(ctx context.Context, c *Client, jwt string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/app/installations", nil)
+func accountList(insts []Installation) string {
+	names := make([]string, 0, len(insts))
+	for _, i := range insts {
+		names = append(names, fmt.Sprintf("%s (%d)", i.Account.Login, i.ID))
+	}
+	return strings.Join(names, ", ")
+}
+
+// list returns the App's installations, fetching them once. An App's
+// installations change rarely, and re-listing them on every token refresh
+// or settings page load spends a request for nothing.
+//
+// The caller must hold a.mu.
+func (a *appAuth) list(ctx context.Context, c *Client) ([]Installation, error) {
+	if len(a.installs) > 0 {
+		return a.installs, nil
+	}
+	jwt, err := a.appJWT()
 	if err != nil {
-		return "", err
+		return nil, err
+	}
+	// A pinned installation is the only one publix acts as, so listing the
+	// others would describe access it does not use.
+	if a.pinned != "" {
+		one, err := fetchInstallation(ctx, c, jwt, a.pinned)
+		if err != nil {
+			return nil, err
+		}
+		a.installs = []Installation{*one}
+		return a.installs, nil
+	}
+	found, err := listInstallations(ctx, c, jwt)
+	if err != nil {
+		return nil, err
+	}
+	if len(found) == 0 {
+		return nil, fmt.Errorf("this GitHub App has no installations yet — install it on the account or organisation whose repositories you want to deploy")
+	}
+	a.installs = found
+	return a.installs, nil
+}
+
+// listInstallations reads every installation of the App. It needs the App
+// JWT: an installation token cannot see the installations beside it.
+func listInstallations(ctx context.Context, c *Client, jwt string) ([]Installation, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/app/installations?per_page=100", nil)
+	if err != nil {
+		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+jwt)
 	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "publix")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", err
+		return nil, fmt.Errorf("calling GitHub: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return "", apiError(resp, "listing app installations")
+		return nil, apiError(resp, "listing app installations")
 	}
-	var out []struct {
-		ID      int64 `json:"id"`
-		Account struct {
-			Login string `json:"login"`
-		} `json:"account"`
-	}
+	var out []Installation
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", err
+		return nil, err
 	}
-	switch len(out) {
-	case 0:
-		return "", fmt.Errorf("this GitHub App has no installations yet — install it on the account or organisation whose repositories you want to deploy")
-	case 1:
-		return strconv.FormatInt(out[0].ID, 10), nil
-	default:
-		names := make([]string, 0, len(out))
-		for _, i := range out {
-			names = append(names, fmt.Sprintf("%s (%d)", i.Account.Login, i.ID))
-		}
-		return "", fmt.Errorf("this GitHub App has %d installations; set the installation ID explicitly. Available: %s",
-			len(out), strings.Join(names, ", "))
-	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return strings.ToLower(out[i].Account.Login) < strings.ToLower(out[j].Account.Login)
+	})
+	return out, nil
 }
 
 // appJWT signs the short-lived assertion used to mint installation tokens.
@@ -276,32 +340,46 @@ type Installation struct {
 	HTMLURL string `json:"html_url"`
 }
 
-// CurrentInstallation describes the installation publix is acting as. The
-// second result is false under a personal access token, where there is no
+// Installations describes every installation publix can act as: which
+// accounts the App is on, and how much of each it was given. The second
+// result is false under a personal access token, where there is no
 // installation to describe.
 //
-// Like App, this needs the App JWT: an installation token cannot read the
-// object that granted it.
-func (c *Client) CurrentInstallation(ctx context.Context) (*Installation, bool, error) {
+// This needs the App JWT: an installation token cannot read the object
+// that granted it, nor see the installations beside it.
+func (c *Client) Installations(ctx context.Context) ([]Installation, bool, error) {
 	a, ok := c.auth.(*appAuth)
 	if !ok {
 		return nil, false, nil
 	}
-	jwt, err := a.appJWT()
-	if err != nil {
-		return nil, true, err
-	}
 	a.mu.Lock()
-	id, err := a.resolve(ctx, c, jwt)
-	a.mu.Unlock()
+	defer a.mu.Unlock()
+	insts, err := a.list(ctx, c)
 	if err != nil {
 		return nil, true, err
 	}
+	return insts, true, nil
+}
 
+// CurrentInstallation describes the single installation publix acts as.
+// It reports false when there is none to name: under a personal access
+// token, or when the App spans several accounts and publix uses them all.
+func (c *Client) CurrentInstallation(ctx context.Context) (*Installation, bool, error) {
+	insts, isApp, err := c.Installations(ctx)
+	if !isApp || err != nil {
+		return nil, isApp, err
+	}
+	if len(insts) != 1 {
+		return nil, false, nil
+	}
+	return &insts[0], true, nil
+}
+
+func fetchInstallation(ctx context.Context, c *Client, jwt, id string) (*Installation, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		fmt.Sprintf("%s/app/installations/%s", c.base, url.PathEscape(id)), nil)
 	if err != nil {
-		return nil, true, err
+		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+jwt)
 	req.Header.Set("Accept", "application/vnd.github+json")
@@ -309,21 +387,42 @@ func (c *Client) CurrentInstallation(ctx context.Context) (*Installation, bool, 
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, true, fmt.Errorf("calling GitHub: %w", err)
+		return nil, fmt.Errorf("calling GitHub: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return nil, true, apiError(resp, "GET /app/installations/"+id)
+		return nil, apiError(resp, "GET /app/installations/"+id)
 	}
 	var out Installation
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, true, err
+		return nil, err
 	}
-	return &out, true, nil
+	return &out, nil
 }
 
-// do performs an authenticated API request.
+// do performs an authenticated API request, routed to whichever App
+// installation owns the repository in the path.
 func (c *Client) do(ctx context.Context, method, path string, body, out any) (*http.Response, error) {
+	return c.doAs(ctx, ownerFromPath(path), method, path, body, out)
+}
+
+// ownerFromPath reads the account out of a /repos/{owner}/{repo}/... path.
+//
+// Deriving it here rather than threading an owner argument through every
+// call means a new repository-scoped method is routed correctly without
+// having to remember to say so.
+func ownerFromPath(path string) string {
+	rest, ok := strings.CutPrefix(path, "/repos/")
+	if !ok {
+		return ""
+	}
+	owner, _, _ := strings.Cut(rest, "/")
+	return owner
+}
+
+// doAs performs an authenticated API request as the installation covering
+// owner. An empty owner means the call is not about one account.
+func (c *Client) doAs(ctx context.Context, owner, method, path string, body, out any) (*http.Response, error) {
 	var rdr io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -342,7 +441,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) (*h
 		return nil, err
 	}
 
-	tok, err := c.auth.token(ctx, c)
+	tok, err := c.auth.token(ctx, c, owner)
 	if err != nil {
 		return nil, err
 	}

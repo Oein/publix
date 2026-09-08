@@ -94,7 +94,15 @@
       autocomplete="off"
     />
     <span class="small muted nowrap">
-      {#if status.login}{t('import.connectedAs')} <strong>{status.login}</strong>{/if}
+      <!-- An App on several accounts is connected as all of them; naming
+           only the first would make the other accounts' repositories below
+           look like they came from somewhere else. -->
+      {#if status.login}{t('import.connectedAs')}
+        <strong
+          >{status.installations?.length > 1
+            ? status.installations.map((i) => i.login).join(', ')
+            : status.login}</strong
+        >{/if}
     </span>
     <Button size="sm" onclick={loadRepos}>{t('common.refresh')}</Button>
   </div>
