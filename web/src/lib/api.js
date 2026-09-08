@@ -95,7 +95,8 @@ export const api = {
     status: () => get('/api/github'),
     connect: (body) => put('/api/github', body),
     disconnect: () => del('/api/github'),
-    repos: (q) => get(`/api/github/repos${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+    repos: (account) =>
+      get(`/api/github/repos${account ? `?account=${encodeURIComponent(account)}` : ''}`),
     inspect: (owner, repo, ref) =>
       get(`/api/github/repos/${owner}/${repo}/inspect${ref ? `?ref=${encodeURIComponent(ref)}` : ''}`),
     import: (body) => post('/api/github/import', body),

@@ -444,33 +444,24 @@ func (s *Server) handleSetEnv(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cleaned, err := cleanEnv(body.Env)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	// A secret the dashboard never received comes back empty, which means
+	// "keep what you already have" rather than "clear it".
 	existing := map[string]store.EnvVar{}
 	for _, e := range p.Env {
 		existing[e.Key] = e
 	}
-
-	seen := map[string]bool{}
-	cleaned := make([]store.EnvVar, 0, len(body.Env))
-	for _, e := range body.Env {
-		key := strings.TrimSpace(e.Key)
-		if key == "" {
-			continue
-		}
-		if !validEnvKey(key) {
-			writeError(w, http.StatusBadRequest, fmt.Errorf("%q is not a valid environment variable name", key))
-			return
-		}
-		if seen[key] {
-			writeError(w, http.StatusBadRequest, fmt.Errorf("%q is listed twice", key))
-			return
-		}
-		seen[key] = true
+	for i, e := range cleaned {
 		if e.Secret && e.Value == "" {
-			if prev, had := existing[key]; had {
-				e.Value = prev.Value
+			if prev, had := existing[e.Key]; had {
+				cleaned[i].Value = prev.Value
 			}
 		}
-		cleaned = append(cleaned, store.EnvVar{Key: key, Value: e.Value, Secret: e.Secret})
 	}
 	sort.Slice(cleaned, func(i, j int) bool { return cleaned[i].Key < cleaned[j].Key })
 
@@ -483,6 +474,29 @@ func (s *Server) handleSetEnv(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.view(updated))
+}
+
+// cleanEnv validates and de-duplicates environment variables arriving from
+// the dashboard. It is shared by the env screen and by import, where the
+// same paste has to mean the same thing.
+func cleanEnv(in []store.EnvVar) ([]store.EnvVar, error) {
+	seen := map[string]bool{}
+	out := make([]store.EnvVar, 0, len(in))
+	for _, e := range in {
+		key := strings.TrimSpace(e.Key)
+		if key == "" {
+			continue
+		}
+		if !validEnvKey(key) {
+			return nil, fmt.Errorf("%q is not a valid environment variable name", key)
+		}
+		if seen[key] {
+			return nil, fmt.Errorf("%q is listed twice", key)
+		}
+		seen[key] = true
+		out = append(out, store.EnvVar{Key: key, Value: e.Value, Secret: e.Secret})
+	}
+	return out, nil
 }
 
 func validEnvKey(k string) bool {

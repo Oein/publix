@@ -164,6 +164,7 @@ export default {
   'env.applyNext': '변경 사항은 다음 배포부터 적용됩니다.',
   'env.saved': '환경 변수를 저장했습니다. 적용하려면 다시 배포하세요.',
   'env.nothingParsed': 'KEY=value 형태로 보이는 줄을 찾지 못했습니다.',
+  'env.added': { one: '변수 {count}개를 추가했습니다.', other: '변수 {count}개를 추가했습니다.' },
   'env.staged': {
     other: '변수 {count}개를 준비했습니다 — 저장을 눌러 적용하세요.',
   },
@@ -225,6 +226,11 @@ export default {
   'import.ghError': 'GitHub가 오류를 반환했습니다',
   'import.checkSettings': 'GitHub 설정 확인',
   'import.search': '저장소 검색…',
+  'import.account': '계정',
+  'import.allShown': {
+    one: '저장소 {count}개를 모두 보여주고 있습니다.',
+    other: '저장소 {count}개를 모두 보여주고 있습니다.',
+  },
   'import.connectedAs': '연결된 계정',
   'import.noReposTitle': '저장소를 찾지 못했습니다',
   'import.noReposDesc':
@@ -262,6 +268,7 @@ export default {
   'id.branchHint': '이 브랜치에 푸시하면 운영에 배포됩니다.',
   'id.rootDir': '루트 디렉터리',
   'id.rootDirHint': '모노레포가 아니면 비워 두세요.',
+  'id.customDomains': '사용자 도메인',
   'id.domains': '도메인',
   'id.domainsHint': '선택 사항입니다. 공백이나 쉼표로 구분하세요.',
   'id.autoDeploy': '푸시할 때마다 배포',
@@ -374,8 +381,18 @@ export default {
   'domainsPage.dnsNote':
     '인증서는 해당 호스트 이름으로 첫 요청이 올 때 Traefik이 발급받습니다. 그래서 아직 해석되지 않는 레코드는 라우팅 오류가 아니라 인증서 오류로 나타납니다.',
 
+  'id.address': '주소',
+  'id.addressHint': '이 프로젝트가 응답할 서브도메인과, 그 아래에 둘 도메인입니다.',
+  'id.domainsNone': '없음',
+  'id.envNone': '없음',
+  'id.envCount': { one: '{count}개', other: '{count}개' },
+  'id.envBlurb':
+    '첫 빌드 전에 설정되므로, 환경 변수가 없어서 배포가 실패하는 일이 없습니다. .env 파일 내용을 그대로 붙여넣으세요.',
+  'id.advanced': '고급',
+  'id.advancedNone': '저장소 루트',
+  'id.noAddressWarning':
+    '이 프로젝트에는 주소가 없습니다 — 앱 도메인도, 사용자 도메인도 없습니다. 빌드되고 실행되지만 아무도 접속할 수 없습니다.',
   'id.appsDomain': '앱 도메인',
-  'id.appsDomainHint': '이 프로젝트의 자동 생성 주소가 어느 상위 도메인에 붙을지 정합니다.',
   'id.appsDomainDefault': '기본 ({domain})',
   'id.appsDomainNone': '없음 — 직접 설정한 도메인만 사용',
   'id.willBeAt': '접속 주소',

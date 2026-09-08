@@ -11,10 +11,34 @@
 
   let { revision } = $props();
 
+  // Declared before the state that uses them: a `let x = $state(PAGE)` above
+  // its own `const PAGE` is a temporal dead zone, and the whole screen
+  // renders blank.
+  const PAGE = 30;
+  const REMEMBER = 'publix.github.account';
+
   let status = $state(null);
   let repos = $state(null);
   let query = $state('');
   let selected = $state(null);
+  // The account whose repositories are listed. An App can be installed on
+  // several, and reading them all to draw one screen cost a request per
+  // account before anything appeared.
+  let account = $state(remembered());
+  // How many rows are rendered. Everything is loaded; this is what keeps a
+  // thousand repositories from becoming a thousand DOM nodes at once.
+  let visible = $state(PAGE);
+  let sentinel = $state(null);
+
+  function remembered() {
+    try {
+      return localStorage.getItem(REMEMBER) ?? '';
+    } catch {
+      return '';
+    }
+  }
+
+  const accounts = $derived(status?.installations?.map((i) => i.login) ?? []);
 
   async function loadStatus() {
     try {
@@ -28,12 +52,24 @@
   async function loadRepos() {
     if (!status?.configured) return;
     repos = null;
+    visible = PAGE;
     try {
-      repos = await api.github.repos();
+      repos = await api.github.repos(account);
     } catch (err) {
       notify.error(err);
       repos = [];
     }
+  }
+
+  function pick(next) {
+    account = next;
+    try {
+      localStorage.setItem(REMEMBER, next);
+    } catch {
+      // A browser that refuses storage still gets the switch, just not
+      // the memory of it.
+    }
+    loadRepos();
   }
 
   $effect(() => {
@@ -41,14 +77,48 @@
     loadStatus();
   });
 
+  // Settle on an account before the first load: a remembered one that is
+  // still installed, otherwise the first.
   $effect(() => {
-    if (status?.configured) loadRepos();
+    if (!status?.configured) return;
+    if (accounts.length && !accounts.includes(account)) account = accounts[0];
+  });
+
+  $effect(() => {
+    if (!status?.configured) return;
+    account;
+    loadRepos();
+  });
+
+  // Reset the window whenever the visible set changes underneath it, or a
+  // search would open onto page three of the previous one.
+  $effect(() => {
+    query;
+    visible = PAGE;
+  });
+
+  // Grow the window while the end of the list is on screen. The observer
+  // fires again as soon as the sentinel is still visible after a batch, so
+  // a search with no match near the top walks down the list on its own.
+  $effect(() => {
+    if (!sentinel) return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) visible += PAGE;
+    });
+    io.observe(sentinel);
+    return () => io.disconnect();
   });
 
   const filtered = $derived(
     !repos
       ? []
       : repos.filter((r) => r.full_name.toLowerCase().includes(query.trim().toLowerCase()))
+  );
+  const shown = $derived(filtered.slice(0, visible));
+  // "Grant it some repositories" has to point at the account being looked
+  // at, not at whichever installation happened to be described first.
+  const installationUrl = $derived(
+    status?.installations?.find((i) => i.login === account)?.url ?? status?.installationUrl
   );
 
   function imported(result) {
@@ -93,17 +163,22 @@
       bind:value={query}
       autocomplete="off"
     />
-    <span class="small muted nowrap">
-      <!-- An App on several accounts is connected as all of them; naming
-           only the first would make the other accounts' repositories below
-           look like they came from somewhere else. -->
-      {#if status.login}{t('import.connectedAs')}
-        <strong
-          >{status.installations?.length > 1
-            ? status.installations.map((i) => i.login).join(', ')
-            : status.login}</strong
-        >{/if}
-    </span>
+    <!-- An App can be installed on several accounts. Choosing one here is
+         what keeps the screen fast: publix reads that account only. -->
+    {#if accounts.length > 1}
+      <label class="account small muted nowrap">
+        {t('import.account')}
+        <select value={account} onchange={(e) => pick(e.currentTarget.value)}>
+          {#each accounts as login (login)}
+            <option value={login}>{login}</option>
+          {/each}
+        </select>
+      </label>
+    {:else}
+      <span class="small muted nowrap">
+        {#if status.login}{t('import.connectedAs')} <strong>{status.login}</strong>{/if}
+      </span>
+    {/if}
     <Button size="sm" onclick={loadRepos}>{t('common.refresh')}</Button>
   </div>
 
@@ -117,12 +192,12 @@
            connecting and granting repository access are separate steps on
            GitHub's side. Say which one is missing rather than listing both
            possibilities. -->
-      {#if status.mode === 'app' && status.installationUrl}
+      {#if status.mode === 'app' && installationUrl}
         <Empty
           title={t('import.noReposAppTitle')}
-          description={t('import.noReposAppDesc', { account: status.login || '—' })}
+          description={t('import.noReposAppDesc', { account: account || status.login || '—' })}
         >
-          <a href={status.installationUrl} target="_blank" rel="noreferrer noopener">
+          <a href={installationUrl} target="_blank" rel="noreferrer noopener">
             <Button size="sm" variant="primary">{t('import.manageAccess')} ↗</Button>
           </a>
         </Empty>
@@ -138,7 +213,7 @@
     </div>
   {:else}
     <ul class="list">
-      {#each filtered as repo (repo.id)}
+      {#each shown as repo (repo.id)}
         <li class="repo">
           <div class="grow">
             <div class="row">
@@ -169,6 +244,13 @@
         </li>
       {/each}
     </ul>
+    {#if shown.length < filtered.length}
+      <div class="sentinel" bind:this={sentinel}>
+        <div class="ghost row-ghost"></div>
+      </div>
+    {:else if filtered.length > PAGE}
+      <p class="small faint end">{t('import.allShown', { count: filtered.length })}</p>
+    {/if}
   {/if}
 {/if}
 
@@ -197,6 +279,18 @@
     gap: 10px;
     margin-bottom: 12px;
   }
+
+  .account { display: flex; align-items: center; gap: 6px; }
+  .account select {
+    font: inherit;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 4px 6px;
+  }
+  .sentinel { margin-top: 10px; }
+  .end { text-align: center; margin: 12px 0 0; }
 
   .search {
     flex: 1;

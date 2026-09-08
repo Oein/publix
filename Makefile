@@ -19,6 +19,7 @@ go:
 ## test: unit tests only — no Docker daemon needed
 test:
 	go test -short ./...
+	cd web && npm test
 
 ## test-all: everything, including tests against a real Docker daemon
 test-all:

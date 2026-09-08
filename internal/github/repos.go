@@ -104,16 +104,33 @@ func (c *Client) Whoami(ctx context.Context) (*Viewer, error) {
 	return &v, nil
 }
 
-// ListRepos returns every repository the credentials can deploy from.
+// ListRepos returns the repositories of one account.
 //
 // The two credential styles read from different endpoints — a token sees
 // the user's repositories, an App sees the ones its installation was
 // granted — so both are collected and presented identically.
-func (c *Client) ListRepos(ctx context.Context) ([]Repo, error) {
-	if _, ok := c.auth.(*appAuth); ok {
-		return c.listInstallationRepos(ctx)
+//
+// account names which installation to read when an App is installed on
+// several. Empty means the first, so a caller that does not care does not
+// have to choose. Reading one account rather than all of them is what
+// keeps this to a request or two: an App on three accounts used to cost
+// three token mints and up to thirty pages before the screen could draw.
+func (c *Client) ListRepos(ctx context.Context, account string) ([]Repo, error) {
+	if _, ok := c.auth.(*appAuth); !ok {
+		return c.listUserRepos(ctx)
 	}
-	return c.listUserRepos(ctx)
+	if account == "" {
+		insts, _, err := c.Installations(ctx)
+		if err != nil {
+			return nil, err
+		}
+		account = insts[0].Account.Login
+	}
+	repos, err := c.installationRepos(ctx, account)
+	if err != nil {
+		return nil, err
+	}
+	return sortRepos(repos), nil
 }
 
 func (c *Client) listUserRepos(ctx context.Context) ([]Repo, error) {
@@ -132,42 +149,6 @@ func (c *Client) listUserRepos(ctx context.Context) ([]Repo, error) {
 		if len(batch) < 100 {
 			break
 		}
-	}
-	return sortRepos(out), nil
-}
-
-// listInstallationRepos collects the repositories of every installation
-// the App has, not just one.
-//
-// Someone who installed the App on their personal account and two
-// organisations means all three: showing one account's repositories and
-// calling that the list would hide the rest with no way to tell.
-func (c *Client) listInstallationRepos(ctx context.Context) ([]Repo, error) {
-	insts, _, err := c.Installations(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var out []Repo
-	seen := map[int64]bool{}
-	var failures []string
-	for _, inst := range insts {
-		repos, err := c.installationRepos(ctx, inst.Account.Login)
-		if err != nil {
-			// One account being unreadable — its installation suspended,
-			// say — must not blank out the others.
-			failures = append(failures, fmt.Sprintf("%s: %v", inst.Account.Login, err))
-			continue
-		}
-		for _, r := range repos {
-			if seen[r.ID] {
-				continue
-			}
-			seen[r.ID] = true
-			out = append(out, r)
-		}
-	}
-	if len(out) == 0 && len(failures) > 0 {
-		return nil, fmt.Errorf("no repositories could be listed — %s", strings.Join(failures, "; "))
 	}
 	return sortRepos(out), nil
 }

@@ -246,7 +246,10 @@ func (s *Server) handleListRepos(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 	defer cancel()
 
-	repos, err := gh.ListRepos(ctx)
+	// One account at a time. Reading every installation to draw one screen
+	// cost a token mint and up to ten pages per account, and the wait was
+	// the whole list's, not each account's.
+	repos, err := gh.ListRepos(ctx, strings.TrimSpace(r.URL.Query().Get("account")))
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err)
 		return
@@ -368,6 +371,14 @@ func (s *Server) handleImportRepo(w http.ResponseWriter, r *http.Request) {
 		Name    string   `json:"name"`
 		RootDir string   `json:"rootDir"`
 		Domains []string `json:"domains"`
+		// Slug is the subdomain the project answers on under its apps
+		// domain. It is chosen here because this is the screen where
+		// someone is deciding the address, and because renaming it later
+		// changes a URL that may already be shared.
+		Slug string `json:"slug"`
+		// Env are environment variables to set before the first deploy,
+		// so the first build is not the one that fails for want of them.
+		Env []store.EnvVar `json:"env"`
 		// AppsDomain picks which registered parent the project's generated
 		// hostname sits under, chosen at import because that is when
 		// someone is looking at where this thing should live.
@@ -419,12 +430,32 @@ func (s *Server) handleImportRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// An explicitly chosen subdomain is a request, not a hint: silently
+	// deploying to blog-2 because blog was taken would leave someone
+	// telling people an address that answers nothing.
+	slug := store.Slugify(firstNonEmpty(strings.TrimSpace(body.Slug), strings.TrimSpace(body.Name), repo.Name))
+	if strings.TrimSpace(body.Slug) != "" {
+		if taken, ok := s.store.Project(slug); ok {
+			writeError(w, http.StatusConflict,
+				fmt.Errorf("the subdomain %q is already used by the project %q", slug, taken.Name))
+			return
+		}
+	}
+
+	env, err := cleanEnv(body.Env)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
 	p := &store.Project{
 		Name:        firstNonEmpty(strings.TrimSpace(body.Name), repo.Name),
+		Slug:        slug,
 		Description: repo.Description,
 		RootDir:     strings.Trim(body.RootDir, "/"),
 		Domains:     domains,
 		AppsDomain:  appsDomain,
+		Env:         env,
 		AutoDeploy:  body.AutoDeploy == nil || *body.AutoDeploy,
 		Repo: &store.Repo{
 			Owner:    repo.Owner,

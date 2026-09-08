@@ -162,7 +162,7 @@ func TestListReposReadsTheInstallationsRepositories(t *testing.T) {
 	srv := newAppServer(t)
 	c := appClient(t, srv.URL)
 
-	repos, err := c.ListRepos(context.Background())
+	repos, err := c.ListRepos(context.Background(), "")
 	if err != nil {
 		t.Fatalf("ListRepos: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestEmptyInstallationIsNotAnError(t *testing.T) {
 	srv.repositories = `{"total_count":0,"repositories":[]}`
 	c := appClient(t, srv.URL)
 
-	repos, err := c.ListRepos(context.Background())
+	repos, err := c.ListRepos(context.Background(), "")
 	if err != nil {
 		t.Fatalf("ListRepos: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestInstallationIsDiscoveredOnce(t *testing.T) {
 	c := appClient(t, srv.URL)
 	ctx := context.Background()
 
-	if _, err := c.ListRepos(ctx); err != nil {
+	if _, err := c.ListRepos(ctx, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := c.CurrentInstallation(ctx); err != nil {
@@ -213,22 +213,48 @@ func TestInstallationIsDiscoveredOnce(t *testing.T) {
 // a couple of organisations. publix used to refuse to act at all in that
 // case, so connecting the App appeared to work and then showed no
 // repositories, with the reason buried in an error nobody saw.
-func TestReposComeFromEveryInstallation(t *testing.T) {
+//
+// The import screen reads one account at a time and lets you switch, so
+// what this asserts is that any account can be asked for by name and that
+// asking for none picks one rather than failing.
+func TestEachInstallationCanBeListed(t *testing.T) {
+	srv := newAppServer(t)
+	srv.multi()
+	c := appClient(t, srv.URL)
+	ctx := context.Background()
+
+	for account, want := range map[string]string{"acme": "acme/web", "personal": "personal/blog"} {
+		repos, err := c.ListRepos(ctx, account)
+		if err != nil {
+			t.Fatalf("%s: %v", account, err)
+		}
+		if len(repos) != 1 || repos[0].FullName != want {
+			t.Errorf("%s gave %+v, want just %s", account, repos, want)
+		}
+	}
+
+	// No account named: one of them, not an error.
+	repos, err := c.ListRepos(ctx, "")
+	if err != nil || len(repos) == 0 {
+		t.Fatalf("listing without an account: %d repos, err %v", len(repos), err)
+	}
+}
+
+// Asking for an account the App is not installed on has to say so, and say
+// where it is installed — otherwise a stale selection reads as "you have no
+// repositories".
+func TestUnknownAccountNamesTheInstalledOnes(t *testing.T) {
 	srv := newAppServer(t)
 	srv.multi()
 	c := appClient(t, srv.URL)
 
-	repos, err := c.ListRepos(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	_, err := c.ListRepos(context.Background(), "someone-else")
+	if err == nil {
+		t.Fatal("want an error for an account with no installation")
 	}
-	owners := map[string]bool{}
-	for _, r := range repos {
-		owners[r.Owner] = true
-	}
-	for _, want := range []string{"acme", "personal"} {
-		if !owners[want] {
-			t.Errorf("no repository from %s; got %+v", want, repos)
+	for _, want := range []string{"someone-else", "acme", "personal"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
 		}
 	}
 }
@@ -286,24 +312,20 @@ func TestPinnedInstallationIsTheOnlyOneUsed(t *testing.T) {
 	}
 }
 
-// One unreadable account — a suspended installation, say — must not blank
-// out the repositories of the others.
-func TestOneBrokenInstallationDoesNotHideTheRest(t *testing.T) {
+// A suspended or revoked installation has to fail loudly for the account
+// it belongs to, rather than looking like an account with no repositories.
+func TestBrokenInstallationIsAnError(t *testing.T) {
 	srv := newAppServer(t)
 	srv.multi()
 	srv.brokenInstallation = "43"
 	c := appClient(t, srv.URL)
+	ctx := context.Background()
 
-	repos, err := c.ListRepos(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	if _, err := c.ListRepos(ctx, "personal"); err == nil {
+		t.Error("the broken account reported success with no repositories")
 	}
-	if len(repos) == 0 {
-		t.Fatal("acme's repositories disappeared because personal's installation failed")
-	}
-	for _, r := range repos {
-		if r.Owner == "personal" {
-			t.Errorf("returned a repository from the broken installation: %+v", r)
-		}
+	repos, err := c.ListRepos(ctx, "acme")
+	if err != nil || len(repos) == 0 {
+		t.Errorf("the working account broke too: %d repos, err %v", len(repos), err)
 	}
 }

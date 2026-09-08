@@ -5,15 +5,23 @@
   import Button from '../lib/Button.svelte';
   import Field from '../lib/Field.svelte';
   import Badge from '../lib/Badge.svelte';
+  import Disclosure from '../lib/Disclosure.svelte';
+  import EnvRows from '../lib/EnvRows.svelte';
   import FrameworkIcon from '../lib/FrameworkIcon.svelte';
   import { t, tparts } from '../lib/i18n.svelte.js';
 
   /**
    * The import dialog.
    *
-   * It inspects the repository first and shows what publix worked out, so
-   * the user confirms a decision they can see rather than pressing a button
-   * and hoping. Everything on this screen is editable before committing.
+   * Two decisions matter here and everything else has a good default: what
+   * this project is called, and what address it answers on. Those are the
+   * only fields open on arrival. The rest — custom domains, environment,
+   * the build itself — sit behind sections that say what they contain, so
+   * the screen is short without hiding anything.
+   *
+   * What publix worked out about the repository is shown rather than
+   * asked, because confirming something you can see beats pressing a
+   * button and hoping.
    */
   let { repo, onclose, onimported } = $props();
 
@@ -34,11 +42,29 @@
   let rootDir = $state('');
   let appsDomain = $state('');
   let domains = $state('');
+  let env = $state([]);
   let autoDeploy = $state(true);
   let deployNow = $state(true);
   let writeSpec = $state(false);
   let spec = $state('');
   let showSpec = $state(false);
+  let showDetails = $state(false);
+
+  // The subdomain follows the name until someone types one, at which point
+  // it is theirs: a URL people may already have been told should not move
+  // because the display name was tidied up afterwards.
+  let subdomain = $state(slugify(repo.name));
+  let subdomainTouched = $state(false);
+
+  function slugify(value) {
+    return value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40)
+      .replace(/-+$/, '');
+  }
 
   async function inspect() {
     inspection = null;
@@ -67,22 +93,34 @@
       .catch(() => (appsDomains = []));
   });
 
+  $effect(() => {
+    const derived = slugify(name);
+    if (!subdomainTouched) subdomain = derived;
+  });
+
   const defaultAppsDomain = $derived(
     appsDomains.find((d) => d.default)?.domain ?? appsDomains[0]?.domain ?? ''
   );
+  const parentDomain = $derived(
+    appsDomain === 'none' ? '' : appsDomain || defaultAppsDomain
+  );
   // What the project's address will be, resolved the same way the server
   // resolves it, so the dialog is not promising something different.
-  const generatedHost = $derived.by(() => {
-    const parent = appsDomain === 'none' ? '' : appsDomain || defaultAppsDomain;
-    if (!parent) return '';
-    const slug =
-      name
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '') || 'project';
-    return `${slug}.${parent}`;
-  });
+  const generatedHost = $derived(
+    parentDomain ? `${subdomain || 'project'}.${parentDomain}` : ''
+  );
+
+  const customDomains = $derived(
+    domains
+      .split(/[\s,]+/)
+      .map((d) => d.trim())
+      .filter(Boolean)
+  );
+  const namedEnv = $derived(env.filter((e) => e.key.trim()));
+
+  // Every address this project will answer on, which is the one thing
+  // worth being sure about before pressing the button.
+  const addresses = $derived([generatedHost, ...customDomains].filter(Boolean));
 
   async function submit() {
     importing = true;
@@ -92,12 +130,11 @@
         repo: repo.name,
         branch,
         name: name.trim(),
+        slug: subdomain.trim(),
         rootDir: rootDir.trim(),
-        domains: domains
-          .split(/[\s,]+/)
-          .map((d) => d.trim())
-          .filter(Boolean),
+        domains: customDomains,
         appsDomain,
+        env: namedEnv.map((e) => ({ key: e.key.trim(), value: e.value, secret: e.secret })),
         autoDeploy,
         deploy: deployNow,
         writeSpec: writeSpec && !inspection?.hasSpec,
@@ -121,32 +158,39 @@
   {:else if inspection === null}
     <div class="inspecting"><span class="spinner"></span> {t('id.inspecting')}</div>
   {:else}
-    <div class="detected">
-      <div class="row">
-        <FrameworkIcon
-          framework={inspection.detection.framework || inspection.detection.kind}
-          title={inspection.detection.name}
-          size={22}
-        />
-        <div class="col" style="gap:1px">
-          <strong class="small">{inspection.detection.name || inspection.detection.kind}</strong>
-          {#if inspection.hasSpec}
-            <span class="small muted">
-              {#each tparts('id.usingSpec') as part}{#if part.slot}<code>{inspection.specPath}</code
-                >{:else}{part.text}{/if}{/each}
-            </span>
-          {:else if inspection.detection.generated}
-            <span class="small muted">{t('id.generated')}</span>
-          {:else}
-            <span class="small muted">{t('id.detected')}</span>
-          {/if}
-        </div>
-        {#if inspection.detection.configFile}
-          <span class="grow"></span>
-          <Badge tone="muted">{inspection.detection.configFile}</Badge>
+    <!-- The detected build is information, not a question. It stays one
+         line unless someone wants the details behind it. -->
+    <button
+      type="button"
+      class="detected"
+      aria-expanded={showDetails}
+      onclick={() => (showDetails = !showDetails)}
+    >
+      <FrameworkIcon
+        framework={inspection.detection.framework || inspection.detection.kind}
+        title={inspection.detection.name}
+        size={22}
+      />
+      <div class="col">
+        <strong class="small">{inspection.detection.name || inspection.detection.kind}</strong>
+        {#if inspection.hasSpec}
+          <span class="small muted">
+            {#each tparts('id.usingSpec') as part}{#if part.slot}<code>{inspection.specPath}</code
+              >{:else}{part.text}{/if}{/each}
+          </span>
+        {:else if inspection.detection.generated}
+          <span class="small muted">{t('id.generated')}</span>
+        {:else}
+          <span class="small muted">{t('id.detected')}</span>
         {/if}
       </div>
+      {#if inspection.detection.configFile}
+        <Badge tone="muted">{inspection.detection.configFile}</Badge>
+      {/if}
+      <span class="caret" aria-hidden="true">{showDetails ? '▾' : '▸'}</span>
+    </button>
 
+    {#if showDetails}
       <dl>
         <div><dt>{t('id.build')}</dt><dd>{inspection.detection.kind}</dd></div>
         {#if inspection.detection.compose}
@@ -184,11 +228,11 @@
           <div><dt>{t('id.port')}</dt><dd>{inspection.detection.port}</dd></div>
         {/if}
       </dl>
+    {/if}
 
-      {#each inspection.warnings ?? [] as warning}
-        <div class="notice warn"><p class="small">{warning}</p></div>
-      {/each}
-    </div>
+    {#each inspection.warnings ?? [] as warning}
+      <div class="notice warn"><p class="small">{warning}</p></div>
+    {/each}
   {/if}
 
   <div class="form">
@@ -208,85 +252,126 @@
       </Field>
     </div>
 
-    <div class="two">
-      <Field label={t('id.rootDir')} hint={t('id.rootDirHint')}>
-        {#snippet children(id)}
-          <input {id} bind:value={rootDir} placeholder="apps/web" autocomplete="off" />
-        {/snippet}
-      </Field>
-
-      <Field label={t('id.domains')} hint={t('id.domainsHint')}>
-        {#snippet children(id)}
-          <input {id} bind:value={domains} placeholder="app.example.com" autocomplete="off" />
-        {/snippet}
-      </Field>
-    </div>
-
+    <!-- The address, built the way it reads: a name you choose, a dot, and
+         a parent domain you pick. Typing a whole hostname into a box and
+         hoping publix agrees with it was the old way. -->
     {#if appsDomains.length > 0}
-      <Field label={t('id.appsDomain')} hint={t('id.appsDomainHint')}>
+      <Field label={t('id.address')} hint={t('id.addressHint')}>
         {#snippet children(id)}
-          <select {id} bind:value={appsDomain}>
-            <option value="">
-              {t('id.appsDomainDefault', { domain: defaultAppsDomain })}
-            </option>
-            {#each appsDomains as d}
-              {#if d.domain !== defaultAppsDomain}
-                <option value={d.domain}>{d.domain}</option>
-              {/if}
-            {/each}
-            <option value="none">{t('id.appsDomainNone')}</option>
-          </select>
+          <div class="host" class:off={!parentDomain}>
+            <input
+              {id}
+              class="sub"
+              value={subdomain}
+              disabled={!parentDomain}
+              oninput={(e) => {
+                subdomainTouched = true;
+                subdomain = slugify(e.currentTarget.value);
+                e.currentTarget.value = subdomain;
+              }}
+              placeholder="project"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <span class="dot" aria-hidden="true">.</span>
+            <select bind:value={appsDomain} aria-label={t('id.appsDomain')}>
+              <option value="">{defaultAppsDomain}</option>
+              {#each appsDomains as d}
+                {#if d.domain !== defaultAppsDomain}
+                  <option value={d.domain}>{d.domain}</option>
+                {/if}
+              {/each}
+              <option value="none">{t('id.appsDomainNone')}</option>
+            </select>
+          </div>
         {/snippet}
       </Field>
       <p class="address small">
         {#if generatedHost}
-          {t('id.willBeAt')} <code>{generatedHost}</code>
+          {t('id.willBeAt')} <code>https://{generatedHost}</code>
+        {:else if customDomains.length > 0}
+          {t('id.willBeAt')} <code>https://{customDomains[0]}</code>
         {:else}
           {t('id.noGeneratedHost')}
         {/if}
       </p>
     {/if}
 
-    <label class="check">
-      <input type="checkbox" bind:checked={autoDeploy} />
-      <span>
-        <strong>{t('id.autoDeploy')}</strong>
-        <span class="small muted">{t('id.autoDeployHint')}</span>
-      </span>
-    </label>
+    <Disclosure
+      label={t('id.customDomains')}
+      summary={customDomains.length ? customDomains.join(', ') : t('id.domainsNone')}
+    >
+      <Field label={t('id.domains')} hint={t('id.domainsHint')}>
+        {#snippet children(id)}
+          <input {id} bind:value={domains} placeholder="app.example.com" autocomplete="off" />
+        {/snippet}
+      </Field>
+    </Disclosure>
 
-    <label class="check">
-      <input type="checkbox" bind:checked={deployNow} />
-      <span>
-        <strong>{t('id.deployNow')}</strong>
-        <span class="small muted">{t('id.deployNowHint')}</span>
-      </span>
-    </label>
+    <Disclosure
+      label={t('env.title')}
+      summary={namedEnv.length
+        ? t('id.envCount', { count: namedEnv.length })
+        : t('id.envNone')}
+    >
+      <p class="small muted nomargin">{t('id.envBlurb')}</p>
+      <EnvRows bind:rows={env} />
+    </Disclosure>
 
-    {#if inspection && !inspection.hasSpec && inspection.suggested}
+    <Disclosure label={t('id.advanced')} summary={rootDir || t('id.advancedNone')}>
+      <Field label={t('id.rootDir')} hint={t('id.rootDirHint')}>
+        {#snippet children(id)}
+          <input {id} bind:value={rootDir} placeholder="apps/web" autocomplete="off" />
+        {/snippet}
+      </Field>
+
+      {#if inspection && !inspection.hasSpec && inspection.suggested}
+        <label class="check">
+          <input type="checkbox" bind:checked={writeSpec} />
+          <span>
+            <strong>{t('id.writeSpec')}</strong>
+            <span class="small muted">{t('id.writeSpecHint')}</span>
+          </span>
+        </label>
+      {/if}
+
+      {#if spec}
+        <div class="specbox">
+          <button type="button" class="disclose" onclick={() => (showSpec = !showSpec)}>
+            {showSpec ? '▾' : '▸'}
+            {inspection?.hasSpec ? t('id.repoSpec') : t('id.suggestedSpec')}
+          </button>
+          {#if showSpec}
+            {#if inspection?.hasSpec}
+              <pre class="mono">{spec}</pre>
+            {:else}
+              <textarea bind:value={spec} spellcheck="false" rows="12"></textarea>
+            {/if}
+          {/if}
+        </div>
+      {/if}
+    </Disclosure>
+
+    <div class="checks">
       <label class="check">
-        <input type="checkbox" bind:checked={writeSpec} />
+        <input type="checkbox" bind:checked={deployNow} />
         <span>
-          <strong>{t('id.writeSpec')}</strong>
-          <span class="small muted">{t('id.writeSpecHint')}</span>
+          <strong>{t('id.deployNow')}</strong>
+          <span class="small muted">{t('id.deployNowHint')}</span>
         </span>
       </label>
-    {/if}
 
-    {#if spec}
-      <div class="specbox">
-        <button class="disclose" onclick={() => (showSpec = !showSpec)}>
-          {showSpec ? '▾' : '▸'}
-          {inspection?.hasSpec ? t('id.repoSpec') : t('id.suggestedSpec')}
-        </button>
-        {#if showSpec}
-          {#if inspection?.hasSpec}
-            <pre class="mono">{spec}</pre>
-          {:else}
-            <textarea bind:value={spec} spellcheck="false" rows="12"></textarea>
-          {/if}
-        {/if}
-      </div>
+      <label class="check">
+        <input type="checkbox" bind:checked={autoDeploy} />
+        <span>
+          <strong>{t('id.autoDeploy')}</strong>
+          <span class="small muted">{t('id.autoDeployHint')}</span>
+        </span>
+      </label>
+    </div>
+
+    {#if addresses.length === 0}
+      <p class="notice warn small">{t('id.noAddressWarning')}</p>
     {/if}
   </div>
 
@@ -324,18 +409,29 @@
   @keyframes spin { to { transform: rotate(360deg); } }
 
   .detected {
-    padding: 12px 14px;
-    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
     background: var(--bg-sunken);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
+    cursor: pointer;
+    text-align: left;
+    color: var(--text);
+    font: inherit;
   }
+  .detected:hover { background: var(--bg-hover); }
+  .detected .col { display: flex; flex-direction: column; gap: 1px; margin-right: auto; }
+  .caret { color: var(--text-muted); font-size: 10px; }
 
   dl {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
     gap: 6px 18px;
     margin: 10px 0 0;
+    padding: 0 2px;
   }
   dl div { display: flex; gap: 8px; font-size: 12.5px; }
   dt { color: var(--text-muted); min-width: 92px; }
@@ -351,7 +447,8 @@
   .warn { background: var(--warn-bg); border-color: var(--warn); }
   .bad { background: var(--bad-bg); border-color: var(--bad); }
 
-  .form { display: flex; flex-direction: column; gap: 14px; }
+  .form { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
+  .nomargin { margin: 0; }
 
   /* Sits directly under the picker it explains, so it must not inherit the
      form's gap and float away from it. */
@@ -363,6 +460,14 @@
     gap: 14px;
   }
   @media (max-width: 620px) { .two { grid-template-columns: 1fr; } }
+
+  .host { display: flex; align-items: center; gap: 6px; }
+  .host .sub { flex: 1 1 45%; min-width: 0; font-family: var(--mono); font-size: 12.5px; }
+  .host select { flex: 1 1 55%; min-width: 0; }
+  .host .dot { color: var(--text-muted); flex: none; }
+  .host.off .sub { opacity: 0.5; }
+
+  .checks { display: flex; flex-direction: column; gap: 10px; }
 
   .check {
     display: flex;
