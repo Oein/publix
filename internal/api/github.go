@@ -51,16 +51,36 @@ func (s *Server) handleGitHubStatus(w http.ResponseWriter, r *http.Request) {
 		out["type"] = viewer.Type
 	}
 
-	// In App mode, describe the installation. Which account it is on and
-	// how much of that account it was given are the two things that decide
+	// In App mode, describe every installation. Which accounts the App is
+	// on and how much of each it was given are the two things that decide
 	// whether the repository list can have anything in it, so the settings
 	// page reports both rather than leaving "connected, but empty" to be
 	// guessed at.
-	if inst, isApp, err := gh.CurrentInstallation(ctx); isApp && err == nil {
-		out["installationId"] = inst.ID
-		out["installationUrl"] = inst.HTMLURL
-		out["repositorySelection"] = inst.RepositorySelection
-		out["accountType"] = inst.Account.Type
+	if insts, isApp, err := gh.Installations(ctx); isApp {
+		if err != nil {
+			out["error"] = err.Error()
+		} else {
+			list := make([]map[string]any, 0, len(insts))
+			for _, inst := range insts {
+				list = append(list, map[string]any{
+					"id":                  inst.ID,
+					"login":               inst.Account.Login,
+					"accountType":         inst.Account.Type,
+					"avatar":              inst.Account.AvatarURL,
+					"url":                 inst.HTMLURL,
+					"repositorySelection": inst.RepositorySelection,
+				})
+			}
+			out["installations"] = list
+			// Keep the single-installation fields for the common case, so
+			// the page reads the same when there is only one to describe.
+			if len(insts) == 1 {
+				out["installationId"] = insts[0].ID
+				out["installationUrl"] = insts[0].HTMLURL
+				out["repositorySelection"] = insts[0].RepositorySelection
+				out["accountType"] = insts[0].Account.Type
+			}
+		}
 	}
 
 	// Report where the App itself sends webhooks. If that already points

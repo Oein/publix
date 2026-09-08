@@ -508,7 +508,16 @@ export default {
   'gh.keepToken': '비워 두면 현재 토큰을 유지합니다',
   'gh.appId': 'App ID',
   'gh.installationId': 'Installation ID',
-  'gh.installationIdHint': '선택 사항입니다. App의 설치가 하나뿐이면 publix가 알아서 찾습니다.',
+  'gh.spansAccounts': {
+    one: '이 App은 {count}개 계정에 설치되어 있습니다. 그 계정의 저장소가 가져오기 목록에 나옵니다.',
+    other:
+      '이 App은 {count}개 계정에 설치되어 있습니다. 가져오기 목록에는 모든 계정의 저장소가 나옵니다.',
+  },
+  'gh.colAccount': '계정',
+  'gh.colAccess': '저장소 접근',
+  'gh.colInstallation': '설치 ID',
+  'gh.installationIdHint':
+    '선택 사항입니다. 비워두면 App이 설치된 모든 계정을 사용하고, 값을 넣으면 그 설치 하나만 사용합니다.',
   'gh.privateKey': '개인 키',
   'gh.privateKeyHint': 'App을 만들 때 GitHub가 준 PEM 파일입니다.',
   'gh.keepKey': '비워 두면 현재 키를 유지합니다',

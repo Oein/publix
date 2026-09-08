@@ -93,10 +93,18 @@
     <p class="muted small">{t('common.loading')}</p>
   {:else if status.configured && !status.error}
     <div class="connected">
-      {#if status.avatar}<img src={status.avatar} alt="" width="34" height="34" />{/if}
+      <!-- With several installations no single avatar is the account, so the
+           table below names them all rather than one standing in for three. -->
+      {#if status.avatar && !(status.installations?.length > 1)}
+        <img src={status.avatar} alt="" width="34" height="34" />
+      {/if}
       <div class="grow">
         <div class="row wrap">
-          <strong>{status.login}</strong>
+          <strong>
+            {status.installations?.length > 1
+              ? status.installations.map((i) => i.login).join(', ')
+              : status.login}
+          </strong>
           <Badge tone="good" dot>{t('gh.connected')}</Badge>
           <Badge tone="muted">{status.mode === 'app' ? t('gh.app') : t('gh.token')}</Badge>
           {#if status.repositorySelection}
@@ -120,6 +128,60 @@
         {/if}
       </div>
     </div>
+
+    <!-- An App installed on several accounts: name each one and how much of
+         it publix was given, since "connected but empty" is nearly always one
+         account granting nothing. -->
+    {#if status.installations?.length > 1}
+      <p class="small muted spans">
+        {t('gh.spansAccounts', { count: status.installations.length })}
+      </p>
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>{t('gh.colAccount')}</th>
+              <th>{t('gh.colAccess')}</th>
+              <th class="num">{t('gh.colInstallation')}</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each status.installations as inst (inst.id)}
+              <tr>
+                <td class="cell">
+                  <div class="acct">
+                    {#if inst.avatar}
+                      <img src={inst.avatar} alt="" width="20" height="20" />
+                    {/if}
+                    <strong>{inst.login}</strong>
+                    <span class="small muted">{inst.accountType}</span>
+                  </div>
+                </td>
+                <td class="cell">
+                  <Badge tone={inst.repositorySelection === 'all' ? 'muted' : 'warn'}>
+                    {inst.repositorySelection === 'all'
+                      ? t('gh.repoAccessAll')
+                      : t('gh.repoAccessSelected')}
+                  </Badge>
+                </td>
+                <td class="cell num"><code>{inst.id}</code></td>
+                <td class="cell right">
+                  {#if inst.url}
+                    <a
+                      class="small"
+                      href={inst.url}
+                      target="_blank"
+                      rel="noreferrer noopener">{t('gh.manageAccess')} ↗</a
+                    >
+                  {/if}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
   {:else if status.error}
     <div class="problem">
       <strong class="small">{t('gh.rejected')}</strong>
@@ -409,6 +471,11 @@
     line-height: 1.5;
     margin: 0;
   }
+
+  .spans { margin: 12px 0 8px; }
+  .acct { display: flex; align-items: center; gap: 7px; }
+  .acct img { border-radius: 50%; flex: none; }
+  .right { text-align: right; }
 
   :global(.card + .card) { margin-top: 14px; }
 </style>

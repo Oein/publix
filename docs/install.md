@@ -121,8 +121,11 @@ Repository permissions:
 
 Then **Install** the App on the account or organisation whose repositories
 you want to deploy, and paste the App ID and the private key into
-Settings → GitHub. publix finds the installation itself when there is only
-one; with several, paste the installation ID too — the error names them.
+Settings → GitHub. publix finds the installations itself. Install it on as
+many accounts as you like — a personal account and a couple of
+organisations is normal — and the Import screen lists the repositories of
+all of them together. The installation ID field is only for narrowing
+publix to one of them.
 
 > **Creating the App is not enough — installing it is a separate step, and
 > so is choosing what it can see.** An App with no repositories granted
@@ -131,9 +134,9 @@ one; with several, paste the installation ID too — the error names them.
 > belong to an organisation, the App has to be installed on *that
 > organisation*, not on your personal account.
 >
-> Settings → GitHub names the account the App is installed on and whether
-> it was given all or only selected repositories, and links straight to the
-> installation's settings on GitHub where that is changed.
+> Settings → GitHub names every account the App is installed on and whether
+> each was given all or only selected repositories, and links straight to
+> the installation's settings on GitHub where that is changed.
 
 Both the webhook URL and its secret are shown on that page, with a copy
 button, precisely because an App's webhook is configured on the App rather
@@ -376,19 +379,26 @@ dashboard's own router down with it. Upgrade, or just delete the file:
 publix now removes it instead of writing it empty.
 
 **Everything answers 404, and `docker compose logs traefik` repeats
-"client version 1.24 is too old".** Traefik's docker provider asks for
-Docker API 1.24; Docker Engine 29 raised its floor to 1.40. Traefik then
-sees no containers at all, so every project router points at a service that
-never appears. The compose file pins `DOCKER_API_VERSION` for the Traefik
-container to fix this; if you are on an older checkout, add it:
+"client version 1.24 is too old".** Traefik's docker provider asks the
+daemon for Docker API 1.24; Docker Engine 29 raised its floor to 1.40. The
+provider then dies in a retry loop and Traefik discovers no containers at
+all, so every project router points at a service that never appears — no
+number of redeploys will help.
 
-```yaml
-  traefik:
-    environment:
-      DOCKER_API_VERSION: "1.44"
+The fix is the Traefik image: 3.6 dropped the pinned 1.24 and negotiates
+properly. `DOCKER_API_VERSION` does **not** help — the provider sets its
+version in code and never reads the environment. The compose file pins
+`traefik:v3.6`; if you are on an older checkout, bump the image and
+recreate the container:
+
+```bash
+docker compose -f deploy/docker-compose.yml pull traefik
+docker compose -f deploy/docker-compose.yml up -d traefik
+docker compose -f deploy/docker-compose.yml logs --tail 20 traefik
 ```
 
-Then `docker compose -f deploy/docker-compose.yml up -d traefik`.
+The logs should no longer mention 1.24. Certificates survive: they live in
+the `traefik-acme` volume, not the container.
 
 **The installer stops on Docker's signing key.** The server cannot reach
 `download.docker.com`. Install Docker another way and re-run with

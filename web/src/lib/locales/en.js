@@ -518,7 +518,16 @@ export default {
   'gh.keepToken': 'Leave empty to keep the current token',
   'gh.appId': 'App ID',
   'gh.installationId': 'Installation ID',
-  'gh.installationIdHint': 'Optional. If the App has exactly one installation, publix finds it.',
+  'gh.spansAccounts': {
+    one: 'This App is installed on {count} account. Repositories from it appear in the import list.',
+    other:
+      'This App is installed on {count} accounts. Repositories from all of them appear in the import list.',
+  },
+  'gh.colAccount': 'Account',
+  'gh.colAccess': 'Repository access',
+  'gh.colInstallation': 'Installation',
+  'gh.installationIdHint':
+    'Optional. Leave it empty to use every account the App is installed on; set it to narrow publix to one.',
   'gh.privateKey': 'Private key',
   'gh.privateKeyHint': 'The PEM file GitHub gave you when you created the App.',
   'gh.keepKey': 'Leave empty to keep the current key',

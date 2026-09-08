@@ -15,12 +15,14 @@
 services:
   publix:
     volumes:
-      # Every volume you register in the dashboard must be mounted here at
-      # the SAME path on both sides. publix hands paths to the Docker
-      # daemon, which resolves them on the host — so a path that means one
-      # thing inside the container and another outside produces projects
-      # bind-mounting the wrong directory.
+      # One line per volume you register in the dashboard, each at the SAME
+      # path on both sides. publix hands paths to the Docker daemon, which
+      # resolves them on the host — so a path that means one thing inside
+      # the container and another outside produces projects bind-mounting
+      # the wrong directory.
       - /mnt/data:/mnt/data
+      - /mnt/media:/mnt/media
+      - /srv/uploads:/srv/uploads
 
   # Traefik rarely needs anything, but the same rule applies if it does.
   # traefik:

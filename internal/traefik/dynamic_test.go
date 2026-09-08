@@ -562,3 +562,33 @@ func TestRedirectRefusesAProxiedHostname(t *testing.T) {
 		t.Error("a redirect was accepted for a hostname that is already proxied")
 	}
 }
+
+// A project route may write redirectTo with or without a scheme. Prefixing
+// one blindly produced https://https://host, and every visitor to that
+// domain landed on a hostname that does not resolve.
+func TestRedirectToKeepsAnExplicitScheme(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"new.example.com", "https://new.example.com/${1}"},
+		{"https://new.example.com", "https://new.example.com/${1}"},
+		{"http://new.example.com", "http://new.example.com/${1}"},
+		{"https://new.example.com/", "https://new.example.com/${1}"},
+	} {
+		d := Build(settings(), []Live{{
+			Project:    project("api"),
+			Spec:       spec(t, "port: 8080\nroutes:\n  - domain: old.example.com\n    redirectTo: "+tc.in+"\n"),
+			Deployment: "dep1",
+		}})
+		var mw *Middleware
+		for _, r := range d.HTTP.Routers {
+			if strings.Contains(r.Rule, "old.example.com") && len(r.Middlewares) == 1 {
+				mw = d.HTTP.Middlewares[r.Middlewares[0]]
+			}
+		}
+		if mw == nil || mw.RedirectRegex == nil {
+			t.Fatalf("%q: no redirect middleware", tc.in)
+		}
+		if got := mw.RedirectRegex.Replacement; got != tc.want {
+			t.Errorf("redirectTo %q -> %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

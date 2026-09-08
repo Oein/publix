@@ -385,10 +385,22 @@ func addRedirect(d *Dynamic, base string, route deployspec.Route) string {
 	name := base + "-redirect"
 	d.HTTP.Middlewares[name] = &Middleware{RedirectRegex: &RedirectRegex{
 		Regex:       `^https?://` + regexpQuote(route.Domain) + `/(.*)`,
-		Replacement: "https://" + route.RedirectTo + "/${1}",
+		Replacement: redirectTarget(route.RedirectTo) + "/${1}",
 		Permanent:   true,
 	}}
 	return name
+}
+
+// redirectTarget turns a route's redirectTo into an absolute URL. People
+// write both "example.com" and "https://example.com"; prefixing the scheme
+// blindly turns the second into https://https://example.com, which sends
+// every visitor to a hostname that does not exist.
+func redirectTarget(target string) string {
+	t := strings.TrimSuffix(strings.TrimSpace(target), "/")
+	if strings.HasPrefix(t, "http://") || strings.HasPrefix(t, "https://") {
+		return t
+	}
+	return "https://" + t
 }
 
 // hostRule builds a Traefik matcher for a host and optional path prefix.
