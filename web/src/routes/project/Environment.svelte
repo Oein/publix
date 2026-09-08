@@ -4,6 +4,7 @@
   import Button from '../../lib/Button.svelte';
   import Card from '../../lib/Card.svelte';
   import { t, tparts } from '../../lib/i18n.svelte.js';
+  import { parseDotenv } from '../../lib/dotenv.js';
 
   /**
    * Environment variables.
@@ -53,28 +54,15 @@
   }
 
   function applyBulk() {
-    const parsed = [];
-    for (const raw of bulk.split('\n')) {
-      const line = raw.trim();
-      if (!line || line.startsWith('#')) continue;
-      const eq = line.indexOf('=');
-      if (eq < 1) continue;
-      let value = line.slice(eq + 1).trim();
-      // Accept the quoting people paste out of a .env file.
-      if (
-        (value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))
-      ) {
-        value = value.slice(1, -1);
-      }
-      parsed.push({ key: line.slice(0, eq).trim(), value, secret: true, stored: false, dirty: true });
-    }
+    const parsed = parseDotenv(bulk);
     if (parsed.length === 0) {
       notify.error(t('env.nothingParsed'));
       return;
     }
     const byKey = new Map(rows.map((r) => [r.key, r]));
-    for (const row of parsed) byKey.set(row.key, row);
+    for (const { key, value } of parsed) {
+      byKey.set(key, { key, value, secret: true, stored: false, dirty: true });
+    }
     rows = [...byKey.values()];
     bulk = '';
     showBulk = false;

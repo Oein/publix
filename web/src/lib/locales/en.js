@@ -166,6 +166,7 @@ export default {
   'env.applyNext': 'Changes apply on the next deployment.',
   'env.saved': 'Environment saved. Redeploy for it to take effect.',
   'env.nothingParsed': 'Nothing that looked like KEY=value was found.',
+  'env.added': { one: '{count} variable added.', other: '{count} variables added.' },
   'env.staged': {
     one: '{count} variable staged — press Save to apply.',
     other: '{count} variables staged — press Save to apply.',
@@ -230,6 +231,11 @@ export default {
   'import.ghError': 'GitHub returned an error',
   'import.checkSettings': 'Check GitHub settings',
   'import.search': 'Search repositories…',
+  'import.account': 'Account',
+  'import.allShown': {
+    one: 'All {count} repository shown.',
+    other: 'All {count} repositories shown.',
+  },
   'import.connectedAs': 'Connected as',
   'import.noReposTitle': 'No repositories found',
   'import.noReposDesc':
@@ -267,6 +273,7 @@ export default {
   'id.branchHint': 'Pushes to this branch deploy to production.',
   'id.rootDir': 'Root directory',
   'id.rootDirHint': 'Leave empty unless this is a monorepo.',
+  'id.customDomains': 'Custom domains',
   'id.domains': 'Domains',
   'id.domainsHint': 'Optional. Space or comma separated.',
   'id.autoDeploy': 'Deploy on every push',
@@ -383,8 +390,18 @@ export default {
   'domainsPage.dnsNote':
     'Certificates are requested by Traefik on the first request to a hostname, so a record that does not resolve yet fails as a certificate error rather than a routing one.',
 
+  'id.address': 'Address',
+  'id.addressHint': 'The subdomain this project answers on, and the domain it sits under.',
+  'id.domainsNone': 'none',
+  'id.envNone': 'none',
+  'id.envCount': { one: '{count} variable', other: '{count} variables' },
+  'id.envBlurb':
+    'Set before the first build, so it is not the deploy that fails for want of them. Paste a .env file straight in.',
+  'id.advanced': 'Advanced',
+  'id.advancedNone': 'repository root',
+  'id.noAddressWarning':
+    'This project has no address: no apps domain and no custom domain. It will build and run, but nothing will reach it.',
   'id.appsDomain': 'Apps domain',
-  'id.appsDomainHint': 'Which registered parent this project\u2019s generated address sits under.',
   'id.appsDomainDefault': 'Default ({domain})',
   'id.appsDomainNone': 'None — only the domains I configure',
   'id.willBeAt': 'Reachable at',
