@@ -592,3 +592,67 @@ func TestRedirectToKeepsAnExplicitScheme(t *testing.T) {
 		}
 	}
 }
+
+// A TCP (SNI passthrough) route becomes a file router that points at the
+// deployment-scoped docker TCP service, so it moves on a cutover exactly
+// like an HTTP hostname does — and never terminates TLS.
+func TestTCPRoutePassthroughRouter(t *testing.T) {
+	set := settings()
+	sp := spec(t, "port: 28571\ntcp:\n  - sni: [p.eagate.573.jp, eagate.573.jp]\n    port: 8443\n    passthrough: true\n")
+	d := Build(set, []Live{{
+		Project:    project("sdvx", "sdvx.example.com"),
+		Spec:       sp,
+		Deployment: "dep1",
+	}})
+
+	if d.TCP == nil || len(d.TCP.Routers) != 1 {
+		t.Fatalf("expected one TCP router, got %+v", d.TCP)
+	}
+	var r *TCPRouter
+	for _, v := range d.TCP.Routers {
+		r = v
+	}
+	if !strings.Contains(r.Rule, "HostSNI(`p.eagate.573.jp`)") || !strings.Contains(r.Rule, "HostSNI(`eagate.573.jp`)") {
+		t.Errorf("rule = %q, want both SNI hosts", r.Rule)
+	}
+	if r.TLS == nil || !r.TLS.Passthrough {
+		t.Errorf("TLS = %+v, want passthrough", r.TLS)
+	}
+	if r.Service != "publix-sdvx-dep1-tcp-8443@docker" {
+		t.Errorf("service = %q, want the deployment-scoped docker TCP service", r.Service)
+	}
+}
+
+// The TCP service backing that router is defined by the container's labels
+// (the immutable half), so Traefik load-balances it via the docker provider.
+func TestTCPRouteEmitsContainerServiceLabel(t *testing.T) {
+	set := settings()
+	sp := spec(t, "port: 28571\ntcp:\n  - sni: [p.eagate.573.jp]\n    port: 8443\n    passthrough: true\n")
+	labels := RouterLabels(set, sp, Meta{Slug: "sdvx", Deployment: "dep1", Port: 28571})
+	key := "traefik.tcp.services.publix-sdvx-dep1-tcp-8443.loadbalancer.server.port"
+	if labels[key] != "8443" {
+		t.Errorf("labels[%q] = %q, want 8443 (labels: %+v)", key, labels[key], labels)
+	}
+	if labels["traefik.enable"] != "true" {
+		t.Errorf("traefik.enable = %q, want true", labels["traefik.enable"])
+	}
+}
+
+// A cutover repoints the TCP router at the new deployment's service without
+// the container being recreated.
+func TestTCPCutoverRepointsService(t *testing.T) {
+	set := settings()
+	sp := spec(t, "port: 28571\ntcp:\n  - sni: [p.eagate.573.jp]\n    port: 8443\n    passthrough: true\n")
+	p := project("sdvx", "sdvx.example.com")
+	before := Build(set, []Live{{Project: p, Spec: sp, Deployment: "old"}})
+	after := Build(set, []Live{{Project: p, Spec: sp, Deployment: "new"}})
+	svc := func(d *Dynamic) string {
+		for _, r := range d.TCP.Routers {
+			return r.Service
+		}
+		return ""
+	}
+	if svc(before) != "publix-sdvx-old-tcp-8443@docker" || svc(after) != "publix-sdvx-new-tcp-8443@docker" {
+		t.Errorf("service did not repoint: before=%q after=%q", svc(before), svc(after))
+	}
+}

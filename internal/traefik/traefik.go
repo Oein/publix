@@ -56,6 +56,13 @@ const (
 // declares it, so Traefik balances across them without further configuration.
 func ServiceName(slug, deployment string) string { return "publix-" + slug + "-" + deployment }
 
+// TCPServiceName is the Traefik TCP service backing one deployment's TCP
+// route on a given port. Each port is a distinct service, so a project can
+// forward several SNI ports at once.
+func TCPServiceName(slug, deployment string, port int) string {
+	return "publix-" + slug + "-" + deployment + "-tcp-" + strconv.Itoa(port)
+}
+
 // ContainerName is the docker name of one replica.
 func ContainerName(slug, deployment string, replica int) string {
 	return "publix-" + slug + "-" + deployment + "-" + strconv.Itoa(replica)
@@ -173,36 +180,56 @@ func BaseLabels(m Meta, role string) map[string]string {
 // a container never has to be recreated for traffic to move to or from it.
 func RouterLabels(set *store.Settings, sp *deployspec.Spec, m Meta) map[string]string {
 	l := map[string]string{}
-	if m.Port <= 0 {
+
+	var tcp []deployspec.TCPRoute
+	if sp != nil {
+		tcp = sp.TCP
+	}
+	// A container with neither an HTTP port nor a TCP route is not routed
+	// at all; tell Traefik to ignore it rather than guess a service.
+	if m.Port <= 0 && len(tcp) == 0 {
 		l["traefik.enable"] = "false"
 		return l
 	}
 
-	svc := ServiceName(m.Slug, m.Deployment)
 	l["traefik.enable"] = "true"
 	l["traefik.docker.network"] = set.Network
-	l["traefik.http.services."+svc+".loadbalancer.server.port"] = strconv.Itoa(m.Port)
 
-	// Give Traefik the same readiness signal publix used at deploy time, so
-	// a replica that goes bad later leaves the rotation on its own.
-	if sp != nil && sp.Health.Type == deployspec.HealthHTTP {
-		base := "traefik.http.services." + svc + ".loadbalancer.healthcheck."
-		l[base+"path"] = sp.Health.Path
-		l[base+"interval"] = sp.Health.Interval.D().String()
-		l[base+"timeout"] = sp.Health.Timeout.D().String()
+	if m.Port > 0 {
+		svc := ServiceName(m.Slug, m.Deployment)
+		l["traefik.http.services."+svc+".loadbalancer.server.port"] = strconv.Itoa(m.Port)
+
+		// Give Traefik the same readiness signal publix used at deploy time,
+		// so a replica that goes bad later leaves the rotation on its own.
+		if sp != nil && sp.Health.Type == deployspec.HealthHTTP {
+			base := "traefik.http.services." + svc + ".loadbalancer.healthcheck."
+			l[base+"path"] = sp.Health.Path
+			l[base+"interval"] = sp.Health.Interval.D().String()
+			l[base+"timeout"] = sp.Health.Timeout.D().String()
+		}
+
+		if host := DeploymentHost(m.Slug, m.Deployment, m.AppsDomain); host != "" {
+			rp := "traefik.http.routers." + DeploymentRouter(m.Slug, m.Deployment) + "."
+			l[rp+"rule"] = "Host(`" + host + "`)"
+			l[rp+"entrypoints"] = strings.Join(set.EntryPoints, ",")
+			l[rp+"service"] = svc
+			if set.TLSEnabled() {
+				l[rp+"tls"] = "true"
+				l[rp+"tls.certresolver"] = set.CertResolver
+			}
+		}
 	}
 
-	host := DeploymentHost(m.Slug, m.Deployment, m.AppsDomain)
-	if host == "" {
-		return l
-	}
-	rp := "traefik.http.routers." + DeploymentRouter(m.Slug, m.Deployment) + "."
-	l[rp+"rule"] = "Host(`" + host + "`)"
-	l[rp+"entrypoints"] = strings.Join(set.EntryPoints, ",")
-	l[rp+"service"] = svc
-	if set.TLSEnabled() {
-		l[rp+"tls"] = "true"
-		l[rp+"tls.certresolver"] = set.CertResolver
+	// TCP (SNI) services, one per route port. The SNI routers that point at
+	// them live in the managed file, so a cutover moves them without the
+	// container being recreated — the same immutable-half / mutable-half
+	// split the HTTP routing uses.
+	for _, t := range tcp {
+		if t.Port <= 0 {
+			continue
+		}
+		tsvc := TCPServiceName(m.Slug, m.Deployment, t.Port)
+		l["traefik.tcp.services."+tsvc+".loadbalancer.server.port"] = strconv.Itoa(t.Port)
 	}
 	return l
 }

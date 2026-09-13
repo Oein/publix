@@ -20,6 +20,58 @@ const DynamicFilename = "publix.yml"
 // Dynamic is the Traefik dynamic configuration publix generates.
 type Dynamic struct {
 	HTTP HTTPConfig `yaml:"http"`
+	// TCP carries SNI-passthrough routes. It is a pointer so the whole
+	// section is omitted when no project declares one — the common case.
+	TCP *TCPConfig `yaml:"tcp,omitempty"`
+}
+
+// TCPConfig is the tcp section of a dynamic configuration.
+type TCPConfig struct {
+	Routers  map[string]*TCPRouter  `yaml:"routers,omitempty"`
+	Services map[string]*TCPService `yaml:"services,omitempty"`
+}
+
+// TCPRouter is one Traefik TCP router, matched by TLS SNI.
+type TCPRouter struct {
+	Rule        string        `yaml:"rule"`
+	EntryPoints []string      `yaml:"entryPoints,omitempty"`
+	Service     string        `yaml:"service"`
+	TLS         *TCPRouterTLS `yaml:"tls,omitempty"`
+}
+
+// TCPRouterTLS carries the passthrough flag. With passthrough set, Traefik
+// forwards the raw TLS stream and never looks at a certificate of its own.
+type TCPRouterTLS struct {
+	Passthrough bool `yaml:"passthrough,omitempty"`
+}
+
+// TCPService is an explicit TCP load-balancer. publix references
+// docker-provider TCP services (defined by container labels) instead, so
+// this type exists only to model the section completely.
+type TCPService struct {
+	LoadBalancer *TCPLoadBalancer `yaml:"loadBalancer,omitempty"`
+}
+
+// TCPLoadBalancer lists TCP backend servers.
+type TCPLoadBalancer struct {
+	Servers []TCPServer `yaml:"servers"`
+}
+
+// TCPServer is one TCP backend address.
+type TCPServer struct {
+	Address string `yaml:"address"`
+}
+
+// tcp lazily initialises the TCP section so it stays omitted until a
+// project actually declares a route.
+func (d *Dynamic) tcp() *TCPConfig {
+	if d.TCP == nil {
+		d.TCP = &TCPConfig{
+			Routers:  map[string]*TCPRouter{},
+			Services: map[string]*TCPService{},
+		}
+	}
+	return d.TCP
 }
 
 // HTTPConfig is the http section of a dynamic configuration.
@@ -153,6 +205,14 @@ func Build(set *store.Settings, live []Live) *Dynamic {
 	}
 	if len(d.HTTP.ServersTransports) == 0 {
 		d.HTTP.ServersTransports = nil
+	}
+	if d.TCP != nil {
+		if len(d.TCP.Services) == 0 {
+			d.TCP.Services = nil
+		}
+		if len(d.TCP.Routers) == 0 && d.TCP.Services == nil {
+			d.TCP = nil
+		}
 	}
 	return d
 }
@@ -350,6 +410,34 @@ func buildProject(d *Dynamic, set *store.Settings, l Live) {
 		}
 		d.HTTP.Routers[name] = r
 	}
+
+	// TCP (SNI) routes move between deployments exactly like HTTP
+	// hostnames, so their routers live in the file and name the TCP service
+	// the deployment's container labels define. With nothing live there is
+	// no service to point at, so emit nothing.
+	if l.Deployment != "" && l.Spec != nil {
+		for j, t := range l.Spec.TCP {
+			if len(t.SNI) == 0 || t.Port <= 0 {
+				continue
+			}
+			name := fmt.Sprintf("publix-tcp-%s-%d", p.Slug, j)
+			d.tcp().Routers[name] = &TCPRouter{
+				Rule:        sniRule(t.SNI),
+				EntryPoints: set.EntryPoints,
+				Service:     TCPServiceName(p.Slug, l.Deployment, t.Port) + "@docker",
+				TLS:         &TCPRouterTLS{Passthrough: t.Passthrough},
+			}
+		}
+	}
+}
+
+// sniRule builds a Traefik TCP matcher from a set of SNI hostnames.
+func sniRule(sni []string) string {
+	parts := make([]string, 0, len(sni))
+	for _, h := range sni {
+		parts = append(parts, "HostSNI(`"+h+"`)")
+	}
+	return strings.Join(parts, " || ")
 }
 
 func addStrip(d *Dynamic, base, prefix string) string {
@@ -454,7 +542,9 @@ func Path(set *store.Settings) string {
 
 // Empty reports whether this configuration routes nothing at all.
 func (d *Dynamic) Empty() bool {
-	return len(d.HTTP.Routers) == 0 && len(d.HTTP.Services) == 0 && len(d.HTTP.Middlewares) == 0
+	httpEmpty := len(d.HTTP.Routers) == 0 && len(d.HTTP.Services) == 0 && len(d.HTTP.Middlewares) == 0
+	tcpEmpty := d.TCP == nil || (len(d.TCP.Routers) == 0 && len(d.TCP.Services) == 0)
+	return httpEmpty && tcpEmpty
 }
 
 // Write renders the configuration into Traefik's file provider directory.

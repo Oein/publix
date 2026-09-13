@@ -89,6 +89,13 @@ type Spec struct {
 	// a redirect, or basic auth.
 	Routes []Route `yaml:"routes,omitempty"`
 
+	// TCP are raw TCP routes matched by TLS SNI. Each forwards a set of
+	// SNI hostnames to a port on the project's container without publix or
+	// Traefik terminating TLS — the escape hatch for a backend that serves
+	// its own certificate (a custom CA) or a protocol Traefik cannot
+	// terminate. Not supported for compose projects.
+	TCP []TCPRoute `yaml:"tcp,omitempty"`
+
 	// Volumes attach server-registered shared volumes. A bare name mounts
 	// at /shared/<name>.
 	Volumes []Volume `yaml:"volumes,omitempty"`
@@ -113,6 +120,21 @@ type Route struct {
 	BasicAuth  []string          `yaml:"basicAuth,omitempty"`
 	// Service overrides which compose service this route reaches.
 	Service string `yaml:"service,omitempty"`
+}
+
+// TCPRoute forwards TLS connections to the container by SNI, without
+// terminating TLS. It is the escape hatch for backends that present their
+// own certificate — a custom CA, or a non-HTTP protocol over TLS. The SNI
+// routers move with a cutover the same way HTTP hostnames do.
+type TCPRoute struct {
+	// SNI are the TLS server names this route matches.
+	SNI []string `yaml:"sni"`
+	// Port is the container port connections are forwarded to.
+	Port int `yaml:"port"`
+	// Passthrough forwards the raw TLS stream untouched, so the backend
+	// terminates it. This is the only supported mode: a terminating TCP
+	// route would need publix to hold the certificate.
+	Passthrough bool `yaml:"passthrough,omitempty"`
 }
 
 // Volume attaches a shared volume registered on the server.

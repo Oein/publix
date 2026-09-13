@@ -392,6 +392,26 @@ func (r *Resolved) validate(src framework.Source) error {
 		}
 	}
 
+	for i, t := range s.TCP {
+		if s.Kind == KindCompose {
+			add("tcp[%d]: TCP routes are not supported for compose projects", i)
+		}
+		if len(t.SNI) == 0 {
+			add("tcp[%d].sni: at least one SNI hostname is required", i)
+		}
+		for j, h := range t.SNI {
+			if !domainRe.MatchString(h) {
+				add("tcp[%d].sni[%d]: %q is not a valid hostname", i, j, h)
+			}
+		}
+		if t.Port < 1 || t.Port > 65535 {
+			add("tcp[%d].port: %d must be between 1 and 65535", i, t.Port)
+		}
+		if !t.Passthrough {
+			add("tcp[%d].passthrough: must be true — publix only supports SNI passthrough, it does not terminate TLS for TCP routes", i)
+		}
+	}
+
 	volSeen := map[string]bool{}
 	mountSeen := map[string]bool{}
 	for i, v := range s.Volumes {
