@@ -17,6 +17,7 @@ import (
 	"github.com/Oein/publix/internal/dockerapi"
 	"github.com/Oein/publix/internal/engine"
 	"github.com/Oein/publix/internal/github"
+	"github.com/Oein/publix/internal/mcp"
 	"github.com/Oein/publix/internal/store"
 )
 
@@ -31,6 +32,16 @@ type Server struct {
 	assets fs.FS
 
 	loginLimiter *limiter
+
+	// routesOnce guards mux, which is built once and shared: the MCP layer
+	// dispatches into the very same routing tree the dashboard uses, which
+	// is what keeps the two interfaces from drifting apart.
+	routesOnce sync.Once
+	mux        *http.ServeMux
+
+	// mcpOnce guards the tool catalogue, built lazily for the same reason.
+	mcpOnce sync.Once
+	mcpSrv  *mcp.Server
 
 	mu sync.Mutex
 	// gh caches the GitHub client, rebuilt when credentials change.
@@ -63,8 +74,19 @@ func New(opt Options) *Server {
 	}
 }
 
-// Handler builds the complete HTTP routing tree.
+// Handler builds the complete HTTP interface: the routing tree wrapped in
+// logging, panic recovery and security headers.
 func (s *Server) Handler() http.Handler {
+	return s.middleware(s.routes())
+}
+
+// routes returns the shared routing tree, building it on first use.
+func (s *Server) routes() *http.ServeMux {
+	s.routesOnce.Do(func() { s.mux = s.buildRoutes() })
+	return s.mux
+}
+
+func (s *Server) buildRoutes() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// Unauthenticated: the webhook proves itself with an HMAC signature,
@@ -122,9 +144,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/system", auth(s.handleSystem))
 	mux.HandleFunc("GET /api/events", auth(s.handleEvents))
 
+	// The Model Context Protocol endpoint, which exposes every capability
+	// above to an AI agent. See mcp.go.
+	mux.HandleFunc("POST /api/mcp", auth(s.handleMCP))
+	mux.HandleFunc("GET /api/mcp", auth(s.handleMCPUnsupported))
+	mux.HandleFunc("DELETE /api/mcp", auth(s.handleMCPDelete))
+
 	mux.HandleFunc("/", s.handleAssets)
 
-	return s.middleware(mux)
+	return mux
 }
 
 // middleware adds logging, panic recovery and security headers.

@@ -35,6 +35,8 @@ func Run(ctx context.Context, version string, args []string) error {
 		{"logs", "show a project's build or runtime logs", cmdLogs},
 		{"volumes", "list or register shared volumes", cmdVolumes},
 		{"validate", "check a deployment.yaml against a checkout", cmdValidate},
+		{"mcp", "serve publix to an AI agent over the Model Context Protocol", cmdMCP},
+		{"token", "mint a bearer token for scripts and MCP clients", cmdToken},
 		{"reconcile", "rewrite Traefik's routing file from current state", cmdReconcile},
 		{"version", "print the publix version", func(context.Context, []string) error {
 			fmt.Println("publix " + version)
@@ -84,7 +86,11 @@ Getting started:
                                   and set a password
 
 Everything else — importing repositories, domains, environment variables,
-shared volumes — is done from the dashboard.
+shared volumes — is done from the dashboard, or by an AI agent over the
+Model Context Protocol:
+
+  publix mcp                      serve every dashboard capability as a tool
+                                  (claude mcp add publix -- publix mcp)
 `)
 }
 

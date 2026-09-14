@@ -213,3 +213,28 @@ scratch at any time.
 The store is a single JSON document written atomically. For a control plane
 whose writes happen at human frequency, the operational value of "one file
 you can read, back up, and edit" beats anything a database would add.
+
+## One API, three front ends
+
+The dashboard, the CLI's remote commands and the MCP server are not three
+implementations of the same operations. There is one HTTP API, and the MCP
+tools are dispatched *into it* — an in-memory request through the same
+`ServeMux` that serves the browser, with the caller's own credentials.
+
+The alternative was a tool layer calling the store and engine directly. It
+would have been a second place for every rule to live: that two projects
+cannot claim one hostname, that a secret sent back empty means "keep it",
+that an apps domain has to be registered before a project can sit under it.
+Those rules are worth exactly one implementation, and the interesting ones
+are refusals — a second path that forgot one would not fail loudly, it would
+quietly do the wrong thing.
+
+So a tool is a declaration: a method, a route, and the arguments that fill
+them. What makes that safe is a test that walks every tool and asserts its
+route resolves to a real handler with a matching method, because a typo in a
+path string would otherwise fall through to the dashboard's catch-all and
+answer with HTML.
+
+The cost is that a tool can only do what the API exposes. That has been the
+right trade so far: the API is what the dashboard needs, and the dashboard
+is the thing MCP is meant to stand in for.

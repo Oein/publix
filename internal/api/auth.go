@@ -73,6 +73,14 @@ func issueSession(key string, expires time.Time) string {
 	return payload + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
+// IssueToken mints a bearer token for a client that has no browser to hold
+// a cookie — a script, or an MCP client. It is the same credential the
+// dashboard uses, so changing the password revokes it along with everything
+// else, and there is no second kind of key to reason about.
+func IssueToken(sessionKey string, ttl time.Duration) string {
+	return issueSession(sessionKey, time.Now().Add(ttl))
+}
+
 // validSession reports whether a token is authentic and unexpired.
 func validSession(key, token string) bool {
 	payload, sig, ok := strings.Cut(token, ".")
