@@ -422,6 +422,8 @@ publix logs <project> -build <ID>     a deployment's build log
 publix volumes [-add name=/path]      list or register shared volumes
 publix validate [DIR]                 check a deployment.yaml before pushing
 publix reconcile                      rewrite Traefik's routing file
+publix mcp                            serve publix to an AI agent
+publix token                          mint a bearer token for scripts
 ```
 
 `publix deploy` exits non-zero if the deployment fails, so it works in CI.
@@ -443,6 +445,32 @@ Checking /srv/app/deployment.yaml
 
 Looks good.
 ```
+
+---
+
+## AI agents
+
+publix speaks the [Model Context Protocol](https://modelcontextprotocol.io),
+so an agent can operate it directly — read a failing build log, fix an
+environment variable, deploy, roll back, register a domain. Every capability
+the dashboard has is a tool.
+
+```bash
+claude mcp add publix -- publix mcp
+```
+
+That is the whole setup on the server itself; from another machine, mint a
+token with `publix token` and set `PUBLIX_URL` and `PUBLIX_TOKEN`.
+
+The tools are not a second implementation. Each one is dispatched through
+the same routing tree that serves the dashboard, so it inherits the same
+validation and the same refusals — two projects still cannot claim one
+hostname, and secret values are redacted for an agent exactly as they are
+for the browser. A token is the same signed session the dashboard issues,
+and it grants everything the dashboard grants.
+
+Full details, including the tool list and what to know before letting an
+agent deploy, are in [docs/mcp.md](docs/mcp.md).
 
 ---
 
@@ -535,3 +563,6 @@ Running publix another way, it needs:
   in clone URLs are stripped from anything written to a build log.
 - Bind publix to loopback and put it behind Traefik with TLS. It runs with
   access to the Docker socket, which is equivalent to root on the host.
+- A bearer token — for a script or an AI agent — is the same signed session
+  the dashboard uses, so it grants everything the dashboard grants and is
+  revoked by changing the password. There is no reduced-permission token.
