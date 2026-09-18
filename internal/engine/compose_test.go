@@ -246,3 +246,66 @@ tcp:
 		t.Error("the primary service was dropped")
 	}
 }
+
+// The exact output that made this worth doing: a deploy run before CI had
+// published the image, reported as "exit status 18".
+func TestComposeFailureNamesAnUnpublishedImage(t *testing.T) {
+	out := ` backend Pulling 
+ frontend Error failed to resolve reference "ghcr.io/oe2n/giten-frontend:3d35112750f65f38471f82892928e069183d8699": ghcr.io/oe2n/giten-frontend:3d35112750f65f38471f82892928e069183d8699: not found
+Error response from daemon: failed to resolve reference "ghcr.io/oe2n/giten-frontend:3d35112750f65f38471f82892928e069183d8699": not found`
+
+	got := composeFailure(out)
+	if got == "" {
+		t.Fatal("the pull failure was not recognised")
+	}
+	if !strings.Contains(got, "not in the registry") {
+		t.Errorf("the message does not say what is wrong:\n%s", got)
+	}
+	if !strings.Contains(got, "ghcr.io/oe2n/giten-frontend:3d35112750f65f38471f82892928e069183d8699") {
+		t.Errorf("the message does not name the image:\n%s", got)
+	}
+	// Someone reading this has to know the running deployment is untouched,
+	// or the obvious next move is to panic and redeploy.
+	if !strings.Contains(got, "still serving") {
+		t.Errorf("the message does not say what is still running:\n%s", got)
+	}
+}
+
+func TestComposeFailureRecognisesADeniedPull(t *testing.T) {
+	got := composeFailure(`Error response from daemon: pull access denied for ghcr.io/acme/private, repository does not exist or may require 'docker login'`)
+	if !strings.Contains(got, "refused") {
+		t.Errorf("a denied pull was not recognised:\n%s", got)
+	}
+	if !strings.Contains(got, "ghcr.io/acme/private") {
+		t.Errorf("the message does not name the image:\n%s", got)
+	}
+}
+
+// Anything else keeps the exit status rather than being explained wrongly.
+func TestComposeFailureStaysQuietWhenItHasNothingToAdd(t *testing.T) {
+	for _, out := range []string{
+		"",
+		"service backend exited with code 1",
+		"yaml: line 4: did not find expected key",
+	} {
+		if got := composeFailure(out); got != "" {
+			t.Errorf("composeFailure(%q) = %q, want no claim", out, got)
+		}
+	}
+}
+
+// A compose run can produce megabytes and only the end explains a failure.
+func TestTailBufferKeepsTheEnd(t *testing.T) {
+	tb := &tailBuffer{limit: 16}
+	for i := 0; i < 100; i++ {
+		if _, err := tb.Write([]byte("0123456789")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(tb.String()) != 16 {
+		t.Fatalf("kept %d bytes, want 16", len(tb.String()))
+	}
+	if !strings.HasSuffix("0123456789", tb.String()[len(tb.String())-1:]) {
+		t.Errorf("the tail is not the end of the stream: %q", tb.String())
+	}
+}

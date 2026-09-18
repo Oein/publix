@@ -3,9 +3,11 @@ package engine
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -341,15 +343,83 @@ func (e *Engine) composeCmd(ctx context.Context, dc *Context, timeout time.Durat
 	// Last wins, so the project's own values override anything the host
 	// happens to have set under the same name.
 	cmd.Env = append(cmd.Env, dc.ComposeEnv...)
-	cmd.Stdout, cmd.Stderr = stdout, stderr
+	// Keep the tail of the output as well as streaming it, so a failure can
+	// be explained rather than reported as an exit status the reader then
+	// has to go and interpret for themselves.
+	tail := &tailBuffer{limit: 8 << 10}
+	cmd.Stdout = io.MultiWriter(stdout, tail)
+	cmd.Stderr = io.MultiWriter(stderr, tail)
 
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return fmt.Errorf("docker compose %s timed out after %s", args[1], timeout)
 		}
+		if hint := composeFailure(tail.String()); hint != "" {
+			return fmt.Errorf("%s", hint)
+		}
 		return fmt.Errorf("docker compose %s failed: %w", argAfterFlags(args), err)
 	}
 	return nil
+}
+
+// tailBuffer keeps the last limit bytes written to it and discards the rest.
+// A compose run can produce megabytes; only the end explains a failure.
+type tailBuffer struct {
+	limit int
+	buf   []byte
+}
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	t.buf = append(t.buf, p...)
+	if excess := len(t.buf) - t.limit; excess > 0 {
+		t.buf = t.buf[excess:]
+	}
+	return len(p), nil
+}
+
+func (t *tailBuffer) String() string { return string(t.buf) }
+
+// imageRefRe pulls the image out of the messages Docker produces when it
+// cannot get one.
+var imageRefRe = regexp.MustCompile(`(?:failed to resolve reference|pull access denied for|manifest for)\s+"?([^\s",:]+(?::[^\s",]+)?)`)
+
+// composeFailure turns compose's output into a sentence about what went
+// wrong, or "" when there is nothing better to say than the exit status.
+//
+// The case worth naming is an image that is not in the registry yet. A
+// project whose images are built by CI is deployed by pushing, and anyone
+// who deploys before that build has published sees a pull failure buried in
+// output about several containers. What they need to be told is that the
+// image does not exist yet — not that compose exited 18.
+func composeFailure(out string) string {
+	lower := strings.ToLower(out)
+
+	image := ""
+	if m := imageRefRe.FindStringSubmatch(out); len(m) > 1 {
+		image = m[1]
+	}
+	named := func(msg string) string {
+		if image != "" {
+			return msg + ":\n  " + image
+		}
+		return msg
+	}
+
+	switch {
+	case strings.Contains(lower, "manifest unknown"),
+		strings.Contains(lower, "failed to resolve reference") && strings.Contains(lower, "not found"):
+		return named("the image this deployment needs is not in the registry") +
+			"\n\nIf the images are built by CI, that build has probably not published yet — wait for it" +
+			" rather than deploying again. Nothing was changed: what was already running is still serving."
+
+	case strings.Contains(lower, "pull access denied"),
+		strings.Contains(lower, "unauthorized"),
+		strings.Contains(lower, "requested access to the resource is denied"):
+		return named("the registry refused to serve the image") +
+			"\n\nThe image may be private and this server not logged in to the registry," +
+			" or the credentials it has may have expired."
+	}
+	return ""
 }
 
 // argAfterFlags names the compose subcommand for an error message.
