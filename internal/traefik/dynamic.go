@@ -245,7 +245,19 @@ func Hosts(set *store.Settings, p *store.Project, sp *deployspec.Spec) []deploys
 	for _, dom := range p.Domains {
 		add(deployspec.Route{Domain: dom})
 	}
-	if h := ProjectHost(p.Slug, set.AppsDomainFor(p)); h != "" {
+	// The dashboard's choice is the operator's and wins when they made
+	// one; otherwise the repository decides, including whether it wants a
+	// generated hostname at all.
+	parent := set.AppsDomainFor(p)
+	if p.AppsDomain == "" && sp != nil && sp.AppsDomain != "" {
+		switch {
+		case sp.AppsDomain == store.AppsDomainNone:
+			parent = ""
+		case set.HasAppsDomain(sp.AppsDomain):
+			parent = sp.AppsDomain
+		}
+	}
+	if h := ProjectHost(p.Slug, parent); h != "" {
 		add(deployspec.Route{Domain: h})
 	}
 	return routes

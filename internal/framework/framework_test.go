@@ -486,3 +486,37 @@ func TestBunUsesItsOwnImage(t *testing.T) {
 		t.Errorf("bun should not be installed by curl:\n%s", out)
 	}
 }
+
+// A Next.js app need not ship a public directory. COPY fails outright on a
+// source glob that matches nothing, so the obvious `public*` spelling broke
+// the build of every app without static assets — with an error naming
+// neither the app nor the directory.
+func TestNextStandaloneCopiesPublicUnconditionally(t *testing.T) {
+	r := Detect(fake(map[string]string{
+		"package.json":      nextPkg,
+		"package-lock.json": "{}",
+		"next.config.js":    "module.exports = { output: 'standalone' };",
+	}))
+	if !r.Standalone {
+		t.Fatalf("standalone output was not detected: %+v", r)
+	}
+	raw, err := r.Render()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(raw)
+
+	if strings.Contains(out, "public*") {
+		t.Errorf("the generated Dockerfile still globs for public:\n%s", out)
+	}
+	if !strings.Contains(out, "RUN mkdir -p /app/public") {
+		t.Errorf("nothing guarantees the directory exists before it is copied:\n%s", out)
+	}
+	// The mkdir has to happen in the build stage, before the runtime stage
+	// copies from it.
+	mk := strings.Index(out, "RUN mkdir -p /app/public")
+	cp := strings.Index(out, "COPY --from=build /app/public ./public")
+	if mk < 0 || cp < 0 || mk > cp {
+		t.Errorf("mkdir does not precede the copy (mkdir=%d copy=%d):\n%s", mk, cp, out)
+	}
+}

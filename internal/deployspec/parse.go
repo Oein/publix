@@ -429,6 +429,10 @@ func (r *Resolved) validate(src framework.Source) error {
 		}
 	}
 
+	if s.AppsDomain != "" && s.AppsDomain != "none" && !domainRe.MatchString(s.AppsDomain) {
+		add("appsDomain: %q is not a hostname or \"none\"", s.AppsDomain)
+	}
+
 	hostPorts := map[string]bool{}
 	for i, p := range s.Ports {
 		if p.Host < 1 || p.Host > 65535 {
