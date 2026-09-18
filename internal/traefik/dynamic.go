@@ -225,7 +225,11 @@ func Hosts(set *store.Settings, p *store.Project, sp *deployspec.Spec) []deploys
 	seen := map[string]bool{}
 
 	add := func(r deployspec.Route) {
-		key := strings.ToLower(r.Domain) + "|" + r.Path
+		// A hostname may carry more than one route when they reach
+		// different services or match different requests — that is how one
+		// host is split between a web UI and the API beside it. Only a
+		// genuinely indistinguishable repeat is dropped.
+		key := strings.ToLower(r.Domain) + "|" + r.Path + "|" + r.Service + "|" + matchFingerprint(r.MatchAny)
 		if r.Domain == "" || seen[key] {
 			return
 		}
@@ -389,9 +393,10 @@ func buildProject(d *Dynamic, set *store.Settings, l Live) {
 		}
 
 		r := &Router{
-			Rule:        hostRule(route.Domain, route.Path),
+			Rule:        routeRule(route),
 			EntryPoints: set.EntryPoints,
 			Service:     ServiceName(p.Slug, l.Deployment) + "@docker",
+			Priority:    route.Priority,
 			TLS:         routerTLS(set, route),
 		}
 		if route.Service != "" {
@@ -417,16 +422,28 @@ func buildProject(d *Dynamic, set *store.Settings, l Live) {
 	// no service to point at, so emit nothing.
 	if l.Deployment != "" && l.Spec != nil {
 		for j, t := range l.Spec.TCP {
-			if len(t.SNI) == 0 || t.Port <= 0 {
+			if t.Port <= 0 {
 				continue
 			}
 			name := fmt.Sprintf("publix-tcp-%s-%d", p.Slug, j)
-			d.tcp().Routers[name] = &TCPRouter{
-				Rule:        sniRule(t.SNI),
-				EntryPoints: set.EntryPoints,
-				Service:     TCPServiceName(p.Slug, l.Deployment, t.Port) + "@docker",
-				TLS:         &TCPRouterTLS{Passthrough: t.Passthrough},
+			router := &TCPRouter{
+				Service: TCPServiceFor(p.Slug, l.Deployment, t) + "@docker",
 			}
+
+			if t.Raw() {
+				// Nothing on this path is TLS, so there is no SNI to match
+				// and no certificate to pass through. The dedicated entry
+				// point is the whole matcher: HostSNI(`*`) is how Traefik
+				// spells "anything, including a connection that never
+				// offered a server name".
+				router.Rule = "HostSNI(`*`)"
+				router.EntryPoints = []string{t.EntryPoint}
+			} else {
+				router.Rule = sniRule(t.SNI)
+				router.EntryPoints = set.EntryPoints
+				router.TLS = &TCPRouterTLS{Passthrough: t.Passthrough}
+			}
+			d.tcp().Routers[name] = router
 		}
 	}
 }
@@ -498,6 +515,61 @@ func hostRule(host, path string) string {
 		rule += " && PathPrefix(`" + path + "`)"
 	}
 	return rule
+}
+
+// routeRule builds the matcher for a project route: the hostname, then
+// whatever narrows it.
+//
+// The host is always present and always first. A project can only ever
+// narrow a hostname publix has already decided it owns, never widen one.
+func routeRule(route deployspec.Route) string {
+	rule := hostRule(route.Domain, route.Path)
+	if len(route.MatchAny) == 0 {
+		return rule
+	}
+
+	parts := make([]string, 0, len(route.MatchAny))
+	for _, m := range route.MatchAny {
+		if s := matchRule(m); s != "" {
+			parts = append(parts, s)
+		}
+	}
+	switch len(parts) {
+	case 0:
+		return rule
+	case 1:
+		return rule + " && " + parts[0]
+	default:
+		return rule + " && (" + strings.Join(parts, " || ") + ")"
+	}
+}
+
+// matchRule renders one condition. Exactly one selector is set; validation
+// rejected anything else long before this.
+func matchRule(m deployspec.Match) string {
+	switch {
+	case m.PathPrefix != "":
+		return "PathPrefix(`" + m.PathPrefix + "`)"
+	case m.PathRegexp != "":
+		return "PathRegexp(`" + m.PathRegexp + "`)"
+	case m.Header != "":
+		return "HeaderRegexp(`" + m.Header + "`, `" + m.Regexp + "`)"
+	case m.Query != "":
+		return "QueryRegexp(`" + m.Query + "`, `" + m.Regexp + "`)"
+	case m.Method != "":
+		return "Method(`" + m.Method + "`)"
+	default:
+		return ""
+	}
+}
+
+// TCPServiceFor names the Traefik TCP service backing one route, which for a
+// compose stack is defined on the service that actually owns the port.
+func TCPServiceFor(slug, deployment string, t deployspec.TCPRoute) string {
+	if t.Service != "" {
+		return TCPServiceName(slug+"-"+Slug(t.Service), ComposeDeploymentKey, t.Port)
+	}
+	return TCPServiceName(slug, deployment, t.Port)
 }
 
 func routerTLS(set *store.Settings, route deployspec.Route) *RouterTLS {
@@ -579,4 +651,14 @@ func Write(set *store.Settings, d *Dynamic) error {
 		return nil
 	}
 	return store.WriteFileAtomic(path, raw, 0o644)
+}
+
+// matchFingerprint distinguishes two routes that differ only in what they
+// match, so neither is silently dropped as a duplicate of the other.
+func matchFingerprint(ms []deployspec.Match) string {
+	parts := make([]string, 0, len(ms))
+	for _, m := range ms {
+		parts = append(parts, matchRule(m))
+	}
+	return strings.Join(parts, "||")
 }

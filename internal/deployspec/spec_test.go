@@ -361,3 +361,208 @@ func TestSvelteKitAdapterDecidesKind(t *testing.T) {
 		t.Errorf("adapter-node should resolve to a framework server, got %q", server.Kind)
 	}
 }
+
+// resolveErr resolves a spec that is expected to fail and returns the
+// message, so a test can assert on what the user is actually told.
+func resolveErr(t *testing.T, yaml string, files map[string]string) string {
+	t.Helper()
+	sp, err := Parse([]byte(yaml))
+	if err != nil {
+		return err.Error()
+	}
+	if _, err := sp.Resolve(writeRepo(t, files)); err != nil {
+		return err.Error()
+	}
+	t.Fatalf("expected this spec to be rejected:\n%s", yaml)
+	return ""
+}
+
+const composeRepo = "services:\n  frontend:\n    image: x\n  backend:\n    image: y\n"
+
+func composeFiles() map[string]string {
+	return map[string]string{"docker-compose.yml": composeRepo}
+}
+
+// A condition with nothing selected matches everything, which is never what
+// anyone meant to write.
+func TestMatchNeedsASelector(t *testing.T) {
+	msg := resolveErr(t, `
+port: 8080
+routes:
+  - domain: git.example.com
+    matchAny:
+      - {}
+`, map[string]string{"Dockerfile": "FROM alpine\n"})
+	if !strings.Contains(msg, "needs one of") {
+		t.Errorf("unhelpful message: %s", msg)
+	}
+}
+
+// Two selectors in one condition would have to be combined, and guessing
+// whether the author meant and or or would silently route their traffic the
+// way they did not ask.
+func TestMatchRejectsTwoSelectorsAtOnce(t *testing.T) {
+	msg := resolveErr(t, `
+port: 8080
+routes:
+  - domain: git.example.com
+    matchAny:
+      - pathPrefix: /api
+        method: POST
+`, map[string]string{"Dockerfile": "FROM alpine\n"})
+	if !strings.Contains(msg, "set only one of") {
+		t.Errorf("unhelpful message: %s", msg)
+	}
+}
+
+func TestMatchHeaderNeedsARegexp(t *testing.T) {
+	msg := resolveErr(t, `
+port: 8080
+routes:
+  - domain: git.example.com
+    matchAny:
+      - header: Content-Type
+`, map[string]string{"Dockerfile": "FROM alpine\n"})
+	if !strings.Contains(msg, "regexp") {
+		t.Errorf("unhelpful message: %s", msg)
+	}
+}
+
+func TestMatchRejectsABrokenRegexp(t *testing.T) {
+	msg := resolveErr(t, `
+port: 8080
+routes:
+  - domain: git.example.com
+    matchAny:
+      - pathRegexp: "([unclosed"
+`, map[string]string{"Dockerfile": "FROM alpine\n"})
+	if !strings.Contains(msg, "not a valid regular expression") {
+		t.Errorf("unhelpful message: %s", msg)
+	}
+}
+
+// Two routes for one host are legitimate when they differ; only an exact
+// repeat is a mistake.
+func TestRoutesOnOneHostAreAllowedWhenTheyDiffer(t *testing.T) {
+	r := resolve(t, `
+type: compose
+compose: docker-compose.yml
+service: frontend
+port: 3000
+routes:
+  - domain: git.example.com
+    service: backend
+    priority: 110
+    matchAny:
+      - pathPrefix: /api
+  - domain: git.example.com
+    service: frontend
+    priority: 100
+`, composeFiles())
+	if len(r.Routes) != 2 {
+		t.Fatalf("got %d routes, want both kept", len(r.Routes))
+	}
+}
+
+func TestIdenticalRoutesAreStillRejected(t *testing.T) {
+	msg := resolveErr(t, `
+port: 8080
+routes:
+  - domain: git.example.com
+  - domain: git.example.com
+`, map[string]string{"Dockerfile": "FROM alpine\n"})
+	if !strings.Contains(msg, "declared twice") {
+		t.Errorf("unhelpful message: %s", msg)
+	}
+}
+
+// A compose stack has several containers, so a TCP port has to say which
+// one it belongs to. Guessing would attach the route to the wrong service.
+func TestComposeTCPRouteNeedsAService(t *testing.T) {
+	msg := resolveErr(t, `
+type: compose
+compose: docker-compose.yml
+service: frontend
+port: 3000
+tcp:
+  - entryPoint: gitssh
+    port: 2222
+`, composeFiles())
+	if !strings.Contains(msg, "service") {
+		t.Errorf("unhelpful message: %s", msg)
+	}
+}
+
+// Compose TCP routes used to be refused outright. Naming the service is
+// what makes them expressible.
+func TestComposeTCPRouteIsAcceptedWithAService(t *testing.T) {
+	r := resolve(t, `
+type: compose
+compose: docker-compose.yml
+service: frontend
+port: 3000
+tcp:
+  - entryPoint: gitssh
+    port: 2222
+    service: backend
+`, composeFiles())
+	if len(r.TCP) != 1 || !r.TCP[0].Raw() {
+		t.Fatalf("TCP = %+v, want one raw route", r.TCP)
+	}
+}
+
+// sni and entryPoint answer the same question in incompatible ways.
+func TestTCPRouteRejectsSNIAndEntryPointTogether(t *testing.T) {
+	msg := resolveErr(t, `
+port: 8080
+tcp:
+  - entryPoint: gitssh
+    sni: [git.example.com]
+    port: 2222
+`, map[string]string{"Dockerfile": "FROM alpine\n"})
+	if !strings.Contains(msg, "alternatives") {
+		t.Errorf("unhelpful message: %s", msg)
+	}
+}
+
+// An entry point forwards everything arriving on it, so two projects
+// claiming one would silently steal each other's connections.
+func TestTCPEntryPointCannotBeClaimedTwice(t *testing.T) {
+	msg := resolveErr(t, `
+port: 8080
+tcp:
+  - entryPoint: gitssh
+    port: 2222
+  - entryPoint: gitssh
+    port: 2223
+`, map[string]string{"Dockerfile": "FROM alpine\n"})
+	if !strings.Contains(msg, "claimed twice") {
+		t.Errorf("unhelpful message: %s", msg)
+	}
+}
+
+// passthrough is a TLS concept; on a raw route there is no TLS to pass.
+func TestRawTCPRouteRejectsPassthrough(t *testing.T) {
+	msg := resolveErr(t, `
+port: 8080
+tcp:
+  - entryPoint: gitssh
+    port: 2222
+    passthrough: true
+`, map[string]string{"Dockerfile": "FROM alpine\n"})
+	if !strings.Contains(msg, "passthrough") {
+		t.Errorf("unhelpful message: %s", msg)
+	}
+}
+
+// A TCP route with neither is not a route at all.
+func TestTCPRouteNeedsSNIOrEntryPoint(t *testing.T) {
+	msg := resolveErr(t, `
+port: 8080
+tcp:
+  - port: 2222
+`, map[string]string{"Dockerfile": "FROM alpine\n"})
+	if !strings.Contains(msg, "either sni hostnames or an entryPoint") {
+		t.Errorf("unhelpful message: %s", msg)
+	}
+}

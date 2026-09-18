@@ -13,6 +13,7 @@ import (
 
 	"github.com/Oein/publix/internal/buildlog"
 	"github.com/Oein/publix/internal/compose"
+	"github.com/Oein/publix/internal/deployspec"
 	"github.com/Oein/publix/internal/store"
 	"github.com/Oein/publix/internal/traefik"
 	"gopkg.in/yaml.v3"
@@ -95,13 +96,14 @@ func (e *Engine) writeComposeOverride(dc *Context, f *compose.File) (string, err
 		Created:    time.Now().UTC().Format(time.RFC3339),
 	}
 
-	// Routed services are the ones a hostname points at: the primary
-	// service, plus anything a route names explicitly.
-	routed := map[string]bool{dc.Spec.Service: true}
-	for _, r := range dc.Spec.Routes {
-		if r.Service != "" {
-			routed[r.Service] = true
+	routed := routedServices(dc.Spec)
+
+	tcpByService := map[string][]deployspec.TCPRoute{}
+	for _, t := range dc.Spec.TCP {
+		if t.Service == "" || t.Port <= 0 {
+			continue
 		}
+		tcpByService[t.Service] = append(tcpByService[t.Service], t)
 	}
 
 	envMapping := envMap(env)
@@ -127,6 +129,14 @@ func (e *Engine) writeComposeOverride(dc *Context, f *compose.File) (string, err
 			}
 			for k, v := range composeRouterLabels(&dc.Settings, svcName, port) {
 				labels[k] = v
+			}
+			// The TCP service lives on the container; the router that points
+			// at it lives in the managed file, so a cutover moves it without
+			// the container being recreated — the same split the HTTP
+			// routing uses.
+			for _, t := range tcpByService[name] {
+				tsvc := traefik.TCPServiceFor(dc.Project.Slug, key, t)
+				labels["traefik.tcp.services."+tsvc+".loadbalancer.server.port"] = itoa(t.Port)
 			}
 		} else {
 			labels["traefik.enable"] = "false"
@@ -166,6 +176,29 @@ func (e *Engine) writeComposeOverride(dc *Context, f *compose.File) (string, err
 	return path, nil
 }
 
+// routedServices names every compose service Traefik has to reach: the
+// primary one, anything an HTTP route names, and anything a TCP route names.
+//
+// A service reached only over TCP — git over SSH, a database port — has no
+// hostname pointing at it, but it is still routed. Deciding this in one
+// place is what stops the labels and the network attachment from disagreeing
+// about which containers matter, which would leave a service advertised to
+// Traefik on a network Traefik cannot see.
+func routedServices(sp *deployspec.Resolved) map[string]bool {
+	routed := map[string]bool{sp.Service: true}
+	for _, r := range sp.Routes {
+		if r.Service != "" {
+			routed[r.Service] = true
+		}
+	}
+	for _, t := range sp.TCP {
+		if t.Service != "" {
+			routed[t.Service] = true
+		}
+	}
+	return routed
+}
+
 // composeRouterLabels are the Traefik labels for a routed compose service.
 func composeRouterLabels(set *store.Settings, svcName string, port int) map[string]string {
 	l := map[string]string{
@@ -189,12 +222,7 @@ func (e *Engine) attachComposeNetwork(ctx context.Context, dc *Context, project 
 		return nil, fmt.Errorf("compose reported success but started no containers for %q", project)
 	}
 
-	routed := map[string]bool{dc.Spec.Service: true}
-	for _, r := range dc.Spec.Routes {
-		if r.Service != "" {
-			routed[r.Service] = true
-		}
-	}
+	routed := routedServices(dc.Spec)
 
 	var out []string
 	for _, c := range containers {

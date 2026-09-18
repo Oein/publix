@@ -120,6 +120,42 @@ type Route struct {
 	BasicAuth  []string          `yaml:"basicAuth,omitempty"`
 	// Service overrides which compose service this route reaches.
 	Service string `yaml:"service,omitempty"`
+	// Priority decides which route wins when two of them match the same
+	// request, highest first. Traefik otherwise ranks by rule length, which
+	// is not what anyone means: a route that carves a handful of requests
+	// out of a hostname has to outrank the catch-all for that hostname, and
+	// whose rule happens to be the longer string is no way to decide it.
+	Priority int `yaml:"priority,omitempty"`
+	// MatchAny narrows a route to requests meeting at least one of these
+	// conditions, on top of the hostname. It is what lets one hostname be
+	// split across two services by something other than a path prefix —
+	// git over HTTP being the case that motivated it, where the requests
+	// belonging to the git protocol are spread across paths that otherwise
+	// belong to the web UI.
+	MatchAny []Match `yaml:"matchAny,omitempty"`
+}
+
+// Match is one alternative condition on a route. Exactly one selector is
+// set: PathPrefix, PathRegexp, Method, or Header/Query paired with Regexp.
+//
+// There is deliberately no raw Traefik rule here. A rule written by hand
+// could match a hostname the project does not own, and the whole point of
+// publix's routing is that a repository cannot claim traffic that is not
+// its own. Every condition below narrows a route that is already anchored
+// to a host publix checked.
+type Match struct {
+	// PathPrefix matches requests whose path starts with this.
+	PathPrefix string `yaml:"pathPrefix,omitempty"`
+	// PathRegexp matches the path against a regular expression.
+	PathRegexp string `yaml:"pathRegexp,omitempty"`
+	// Header names a header matched against Regexp.
+	Header string `yaml:"header,omitempty"`
+	// Query names a query parameter matched against Regexp.
+	Query string `yaml:"query,omitempty"`
+	// Regexp is the pattern for Header or Query.
+	Regexp string `yaml:"regexp,omitempty"`
+	// Method matches the HTTP method, e.g. POST.
+	Method string `yaml:"method,omitempty"`
 }
 
 // TCPRoute forwards TLS connections to the container by SNI, without
@@ -128,14 +164,33 @@ type Route struct {
 // routers move with a cutover the same way HTTP hostnames do.
 type TCPRoute struct {
 	// SNI are the TLS server names this route matches.
-	SNI []string `yaml:"sni"`
+	SNI []string `yaml:"sni,omitempty"`
 	// Port is the container port connections are forwarded to.
 	Port int `yaml:"port"`
 	// Passthrough forwards the raw TLS stream untouched, so the backend
-	// terminates it. This is the only supported mode: a terminating TCP
-	// route would need publix to hold the certificate.
+	// terminates it. This is the only supported mode for an SNI route: a
+	// terminating TCP route would need publix to hold the certificate.
 	Passthrough bool `yaml:"passthrough,omitempty"`
+	// EntryPoint forwards every connection arriving on one dedicated
+	// Traefik entry point, with no TLS anywhere in the path.
+	//
+	// SNI is a TLS field, so a protocol that is not TLS — git over SSH, a
+	// database wire protocol — offers nothing to match on and can only be
+	// told apart by the port it arrived on. That is what this is for, and
+	// it is why the entry point has to be dedicated: everything reaching it
+	// goes to this one project.
+	//
+	// The entry point must exist in Traefik's static configuration, which
+	// publix does not write. See docs/routing.md.
+	EntryPoint string `yaml:"entryPoint,omitempty"`
+	// Service names which compose service the port belongs to. It is
+	// required for a compose project and meaningless for any other kind.
+	Service string `yaml:"service,omitempty"`
 }
+
+// Raw reports whether the route forwards a non-TLS protocol on a dedicated
+// entry point rather than matching TLS SNI.
+func (t TCPRoute) Raw() bool { return t.EntryPoint != "" }
 
 // Volume attaches a shared volume registered on the server.
 //
