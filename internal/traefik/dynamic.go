@@ -217,6 +217,25 @@ func Build(set *store.Settings, live []Live) *Dynamic {
 	return d
 }
 
+// AppsDomainFor resolves the parent domain a project's generated hostname
+// sits under, taking the repository's own choice into account.
+//
+// The dashboard's choice is the operator's and wins when they made one;
+// otherwise the repository decides, including whether it wants a generated
+// hostname at all. Both the router and the dashboard ask this, so neither
+// can show a hostname the other does not serve.
+func AppsDomainFor(set *store.Settings, p *store.Project, sp *deployspec.Spec) string {
+	if p.AppsDomain == "" && sp != nil && sp.AppsDomain != "" {
+		switch {
+		case sp.AppsDomain == store.AppsDomainNone:
+			return ""
+		case set.HasAppsDomain(sp.AppsDomain):
+			return sp.AppsDomain
+		}
+	}
+	return set.AppsDomainFor(p)
+}
+
 // Hosts returns every hostname a project should answer on: the ones it
 // declares, the ones configured in the dashboard, and its generated
 // <slug>.<appsDomain>.
@@ -245,19 +264,7 @@ func Hosts(set *store.Settings, p *store.Project, sp *deployspec.Spec) []deploys
 	for _, dom := range p.Domains {
 		add(deployspec.Route{Domain: dom})
 	}
-	// The dashboard's choice is the operator's and wins when they made
-	// one; otherwise the repository decides, including whether it wants a
-	// generated hostname at all.
-	parent := set.AppsDomainFor(p)
-	if p.AppsDomain == "" && sp != nil && sp.AppsDomain != "" {
-		switch {
-		case sp.AppsDomain == store.AppsDomainNone:
-			parent = ""
-		case set.HasAppsDomain(sp.AppsDomain):
-			parent = sp.AppsDomain
-		}
-	}
-	if h := ProjectHost(p.Slug, parent); h != "" {
+	if h := ProjectHost(p.Slug, AppsDomainFor(set, p, sp)); h != "" {
 		add(deployspec.Route{Domain: h})
 	}
 	return routes

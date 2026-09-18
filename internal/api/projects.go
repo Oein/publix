@@ -103,13 +103,22 @@ func (s *Server) view(p *store.Project) projectView {
 	}
 	v.FrameworkName = frameworkLabel(v.Framework)
 
+	// A hostname may carry several routes — that is how one host is split
+	// between services — but it is still one address, and listing it three
+	// times tells a reader nothing.
+	seen := map[string]bool{}
 	for _, r := range traefik.Hosts(&set, p, sp) {
-		if r.RedirectTo == "" {
-			v.Hosts = append(v.Hosts, r.Domain+r.Path)
+		host := r.Domain + r.Path
+		if r.RedirectTo != "" || seen[host] {
+			continue
 		}
+		seen[host] = true
+		v.Hosts = append(v.Hosts, host)
 	}
 	v.URL = engine.ProjectURL(&set, p, sp)
-	v.AppsDomainResolved = set.AppsDomainFor(p)
+	// Ask the same resolver the router uses: a dashboard offering a
+	// hostname nothing serves is worse than offering none.
+	v.AppsDomainResolved = traefik.AppsDomainFor(&set, p, sp)
 	v.GeneratedHost = traefik.ProjectHost(p.Slug, v.AppsDomainResolved)
 	_, v.Building = s.engine.Running(p.ID)
 	return v

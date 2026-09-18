@@ -602,3 +602,52 @@ func contains(list []string, want string) bool {
 	}
 	return false
 }
+
+// A hostname split between services carries several routes, but it is still
+// one address. Listing it once per route tells a reader nothing and makes a
+// project look misconfigured.
+func TestSplitHostnameIsListedOnce(t *testing.T) {
+	srv, token := newTestServer(t)
+	callTool(t, srv, token, "create_project", map[string]any{"name": "Giten"})
+
+	updated, err := srv.store.UpdateProject("giten", func(p *store.Project) error {
+		p.Domains = []string{"git.example.com"}
+		p.Current = "dep1"
+		p.Deployments = []*store.Deployment{{ID: "dep1", Status: store.StatusLive, Spec: `
+type: compose
+compose: docker-compose.yml
+service: frontend
+port: 3000
+routes:
+  - domain: git.example.com
+    service: backend
+    priority: 110
+    matchAny:
+      - pathPrefix: /api
+  - domain: git.example.com
+    service: frontend
+    priority: 100
+appsDomain: none
+`}}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	v := srv.view(updated)
+	count := 0
+	for _, h := range v.Hosts {
+		if h == "git.example.com" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("hosts = %v, want the split hostname listed once", v.Hosts)
+	}
+	// And the opt-out has to reach the dashboard too: offering a generated
+	// hostname nothing serves is worse than offering none.
+	if v.GeneratedHost != "" {
+		t.Errorf("generatedHost = %q, want none after appsDomain: none", v.GeneratedHost)
+	}
+}
