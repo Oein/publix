@@ -178,8 +178,9 @@ func (e *Engine) probe(ctx context.Context, dc *Context, containerID string) err
 	// A compose stack's services listen on different ports, and the probe
 	// has to use the one this container actually serves — the same port
 	// Traefik was told about. An explicit health.port still wins, because
-	// that is someone saying they know better.
-	if h.Port == 0 {
+	// that is someone saying they know better; a defaulted one is only the
+	// project's own port standing in, which for a stack is a guess.
+	if h.PortDefaulted() {
 		if p, ok := dc.ProbePorts[containerID]; ok && p > 0 {
 			port = p
 		}

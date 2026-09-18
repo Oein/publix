@@ -339,7 +339,17 @@ type Health struct {
 	Timeout  Duration          `yaml:"timeout,omitempty"`
 	Grace    Duration          `yaml:"grace,omitempty"`
 	Headers  map[string]string `yaml:"headers,omitempty"`
+
+	// portDefaulted records that Port was filled in from the project's own
+	// port rather than written down. The two have to be told apart: a
+	// compose stack's services listen on different ports, so a defaulted
+	// port is a guess to be improved on, while one someone wrote is a
+	// decision to be obeyed.
+	portDefaulted bool
 }
+
+// PortDefaulted reports whether health.port was inferred rather than given.
+func (h Health) PortDefaulted() bool { return h.portDefaulted }
 
 // Resources caps what the project may consume, per replica.
 type Resources struct {

@@ -230,6 +230,7 @@ func (s *Spec) applyDefaults() {
 	}
 	if s.Health.Port == 0 {
 		s.Health.Port = s.Port
+		s.Health.portDefaulted = true
 	}
 	if s.Health.Interval == 0 {
 		s.Health.Interval = Duration(2 * time.Second)

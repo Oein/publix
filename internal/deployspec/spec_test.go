@@ -671,3 +671,24 @@ volumes:
 		t.Errorf("unhelpful message: %s", msg)
 	}
 }
+
+// A defaulted health port is the project's own port standing in, which for
+// a compose stack is a guess about services that do not share one. A port
+// someone wrote down is a decision. The probe has to tell them apart.
+func TestHealthPortDefaultingIsDistinguishable(t *testing.T) {
+	inferred := resolve(t, "port: 3000\n", map[string]string{"Dockerfile": "FROM alpine\n"})
+	if !inferred.Health.PortDefaulted() {
+		t.Error("a health port taken from the project's port does not read as defaulted")
+	}
+	if inferred.Health.Port != 3000 {
+		t.Errorf("health.port = %d, want the project's port", inferred.Health.Port)
+	}
+
+	explicit := resolve(t, "port: 3000\nhealth:\n  port: 9000\n", map[string]string{"Dockerfile": "FROM alpine\n"})
+	if explicit.Health.PortDefaulted() {
+		t.Error("an explicit health port reads as defaulted, so it would be overridden")
+	}
+	if explicit.Health.Port != 9000 {
+		t.Errorf("health.port = %d, want what was written", explicit.Health.Port)
+	}
+}
