@@ -315,6 +315,15 @@ type Context struct {
 	Service string
 	// Services maps compose service names to Traefik service names.
 	Services map[string]string
+	// ComposeEnv is the project's resolved environment, handed to the
+	// compose process so a compose file's ${VAR} interpolation resolves.
+	ComposeEnv []string
+	// ServicePorts is each compose service's port, by service name.
+	ServicePorts map[string]int
+	// ProbePorts is the port to health-check each container on, by
+	// container ID. A compose stack's services do not share a port, so
+	// probing them all on the project's one port checks the wrong thing.
+	ProbePorts map[string]int
 	// URL is the deployment's own address.
 	URL string
 }

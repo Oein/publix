@@ -140,6 +140,25 @@ message naming neither.
 
 ---
 
+## Turning off the generated hostname
+
+Every project gets `<slug>.<apps-domain>` for free, which is what makes an
+import work before any DNS exists. A project that serves a domain it owns
+often does not want the second address to keep working — it splits links and
+leaves a name that is not the canonical one:
+
+```yaml
+domains:
+  - git.example.com
+
+appsDomain: none
+```
+
+`appsDomain:` can also name a different registered parent. An explicit choice
+made in the dashboard is the operator's and wins over either.
+
+---
+
 ## What still moves atomically
 
 Everything Traefik routes keeps publix's central property. The container's

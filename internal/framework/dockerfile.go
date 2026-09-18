@@ -104,6 +104,13 @@ func (r *Result) renderNode() ([]byte, error) {
 	if r.Build != "" {
 		fmt.Fprintf(&b, "RUN %s\n", r.Build)
 	}
+	if r.Standalone {
+		// A Next.js app need not have a public directory, and COPY fails
+		// outright on a source glob that matches nothing — so the obvious
+		// `public*` spelling breaks every app that has no static assets.
+		// Creating the directory here makes the copy below unconditional.
+		b.WriteString("RUN mkdir -p /app/public\n")
+	}
 
 	// Stage 3: runtime.
 	fmt.Fprintf(&b, "\nFROM %s AS runtime\nWORKDIR /app\n", r.Runtime)
@@ -117,7 +124,7 @@ func (r *Result) renderNode() ([]byte, error) {
 		b.WriteString("# Next.js standalone output: only the server and its assets.\n")
 		b.WriteString("COPY --from=build /app/.next/standalone ./\n")
 		b.WriteString("COPY --from=build /app/.next/static ./.next/static\n")
-		b.WriteString("COPY --from=build /app/public* ./public\n")
+		b.WriteString("COPY --from=build /app/public ./public\n")
 	} else {
 		// Reinstalling production dependencies drops devDependencies,
 		// which are usually the bulk of a node_modules tree.

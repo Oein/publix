@@ -92,6 +92,17 @@ type Spec struct {
 	// a redirect, or basic auth.
 	Routes []Route `yaml:"routes,omitempty"`
 
+	// AppsDomain chooses which registered parent the project's generated
+	// <slug>.<parent> hostname sits under, or "none" for no generated
+	// hostname at all.
+	//
+	// A project that has bought a domain and serves it does not want a
+	// second address that also works: it splits links, and it is one more
+	// name to remember is not canonical. Saying so here rather than only in
+	// the dashboard keeps it with the rest of what the repository decides.
+	// The dashboard still wins when it has been given an explicit choice.
+	AppsDomain string `yaml:"appsDomain,omitempty"`
+
 	// TCP are raw TCP routes matched by TLS SNI. Each forwards a set of
 	// SNI hostnames to a port on the project's container without publix or
 	// Traefik terminating TLS — the escape hatch for a backend that serves

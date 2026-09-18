@@ -784,3 +784,55 @@ tcp:
 		t.Errorf("entryPoints = %v, want the configured ones", r.EntryPoints)
 	}
 }
+
+// A project that serves a domain it owns does not necessarily want a second
+// address that also works: it splits links, and leaves a name that is not
+// canonical. The repository can say so.
+func TestSpecCanOptOutOfTheGeneratedHostname(t *testing.T) {
+	set := settings()
+	p := project("giten", "git.example.com")
+
+	with := Hosts(set, p, spec(t, "port: 3000\nappsDomain: none\n"))
+	for _, r := range with {
+		if strings.HasSuffix(r.Domain, "apps.example.com") {
+			t.Errorf("a generated hostname survived the opt-out: %v", hostsOf(with))
+		}
+	}
+	if len(with) != 1 || with[0].Domain != "git.example.com" {
+		t.Errorf("hosts = %v, want only the custom domain", hostsOf(with))
+	}
+
+	// Without the opt-out the generated hostname is still there, so the
+	// default has not quietly changed for everyone else.
+	without := Hosts(set, p, spec(t, "port: 3000\n"))
+	if len(without) != 2 {
+		t.Errorf("hosts = %v, want the custom and generated names", hostsOf(without))
+	}
+}
+
+// The dashboard's choice is the operator's. When they have made one it wins
+// over the repository's.
+func TestDashboardAppsDomainWinsOverTheSpec(t *testing.T) {
+	set := settings()
+	p := project("giten", "git.example.com")
+	p.AppsDomain = "apps.example.com"
+
+	got := Hosts(set, p, spec(t, "port: 3000\nappsDomain: none\n"))
+	found := false
+	for _, r := range got {
+		if r.Domain == "giten.apps.example.com" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("hosts = %v, want the operator's choice respected", hostsOf(got))
+	}
+}
+
+func hostsOf(routes []deployspec.Route) []string {
+	out := make([]string, 0, len(routes))
+	for _, r := range routes {
+		out = append(out, r.Domain+r.Path)
+	}
+	return out
+}

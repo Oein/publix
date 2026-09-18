@@ -84,6 +84,12 @@ func (e *Engine) writeComposeOverride(dc *Context, f *compose.File) (string, err
 	for _, b := range binds {
 		dc.Log.Printf("Mounting shared volume %q at %s", b.Volume, b.MountPath)
 	}
+	// Compose interpolates ${VAR} in the compose file itself, from its own
+	// process environment — not from the environment given to a service. A
+	// compose file using it would otherwise resolve to empty strings and
+	// start, which is worse than failing, so the project's environment has
+	// to reach the compose process too.
+	dc.ComposeEnv = env
 
 	meta := traefik.Meta{
 		ProjectID:  dc.Project.ID,
@@ -113,6 +119,7 @@ func (e *Engine) writeComposeOverride(dc *Context, f *compose.File) (string, err
 		portsByService[port.Service] = append(portsByService[port.Service], port)
 	}
 
+	var servicePorts map[string]int
 	envMapping := envMap(env)
 	services := map[string]any{}
 
@@ -134,6 +141,13 @@ func (e *Engine) writeComposeOverride(dc *Context, f *compose.File) (string, err
 			if name != dc.Spec.Service {
 				port = firstPortOf(f, name, port)
 			}
+			// Health checks have to use the same port Traefik will send
+			// traffic to. Deciding it once, here, is what keeps the probe
+			// from testing a port the service does not listen on.
+			if servicePorts == nil {
+				servicePorts = map[string]int{}
+			}
+			servicePorts[name] = port
 			for k, v := range composeRouterLabels(&dc.Settings, svcName, port) {
 				labels[k] = v
 			}
@@ -172,6 +186,8 @@ func (e *Engine) writeComposeOverride(dc *Context, f *compose.File) (string, err
 		}
 		services[name] = svc
 	}
+
+	dc.ServicePorts = servicePorts
 
 	doc := map[string]any{"services": services}
 	raw, err := yaml.Marshal(doc)
@@ -256,6 +272,12 @@ func (e *Engine) attachComposeNetwork(ctx context.Context, dc *Context, project 
 		if !routed[service] {
 			continue
 		}
+		if port, ok := dc.ServicePorts[service]; ok && port > 0 {
+			if dc.ProbePorts == nil {
+				dc.ProbePorts = map[string]int{}
+			}
+			dc.ProbePorts[c.ID] = port
+		}
 		aliases := []string{dc.Project.Slug + "-" + traefik.Slug(service)}
 		if service == dc.Spec.Service {
 			aliases = append(aliases, dc.Project.Slug)
@@ -316,6 +338,9 @@ func (e *Engine) composeCmd(ctx context.Context, dc *Context, timeout time.Durat
 		"DOCKER_BUILDKIT=1",
 		"COMPOSE_DOCKER_CLI_BUILD=1",
 	)
+	// Last wins, so the project's own values override anything the host
+	// happens to have set under the same name.
+	cmd.Env = append(cmd.Env, dc.ComposeEnv...)
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 
 	if err := cmd.Run(); err != nil {
