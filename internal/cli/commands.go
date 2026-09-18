@@ -399,12 +399,54 @@ func cmdValidate(ctx context.Context, args []string) error {
 	fmt.Printf("  port        %d\n", resolved.Port)
 	fmt.Printf("  replicas    %d\n", resolved.ReplicaCount())
 	fmt.Printf("  strategy    %s\n", resolved.Release.Strategy)
-	if len(resolved.Routes) > 0 {
-		var domains []string
-		for _, r := range resolved.Routes {
-			domains = append(domains, r.Domain+r.Path)
+	// One line per route rather than a joined list of hostnames: two routes
+	// on one host are the normal way to split it, and a list would show the
+	// same name twice with nothing to tell them apart.
+	for i, r := range resolved.Routes {
+		label := "domains"
+		if i > 0 {
+			label = "       "
 		}
-		fmt.Printf("  domains     %s\n", strings.Join(domains, ", "))
+		line := r.Domain + r.Path
+		if r.Service != "" {
+			line += " → " + r.Service
+		}
+		if r.RedirectTo != "" {
+			line += " ⇒ " + r.RedirectTo
+		}
+		if n := len(r.MatchAny); n > 0 {
+			line += fmt.Sprintf("  (%s)", matchSummary(r.MatchAny))
+		}
+		if r.Priority != 0 {
+			line += fmt.Sprintf("  priority %d", r.Priority)
+		}
+		fmt.Printf("  %-11s %s\n", label, line)
+	}
+	for i, t := range resolved.TCP {
+		label := "tcp"
+		if i > 0 {
+			label = "   "
+		}
+		line := fmt.Sprintf("sni %s → port %d (passthrough)", strings.Join(t.SNI, ", "), t.Port)
+		if t.Service != "" {
+			line += " on " + t.Service
+		}
+		fmt.Printf("  %-11s %s\n", label, line)
+	}
+	for i, p := range resolved.Ports {
+		label := "ports"
+		if i > 0 {
+			label = "     "
+		}
+		host := fmt.Sprintf("%d", p.Host)
+		if p.Bind != "" {
+			host = p.Bind + ":" + host
+		}
+		line := fmt.Sprintf("%s → %d/%s", host, p.Target(), p.Proto())
+		if p.Service != "" {
+			line += " on " + p.Service
+		}
+		fmt.Printf("  %-11s %s\n", label, line)
 	}
 	if len(resolved.Volumes) > 0 {
 		var vols []string
@@ -462,4 +504,25 @@ func age(t time.Time) string {
 	default:
 		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 	}
+}
+
+// matchSummary renders a route's conditions compactly, so `publix validate`
+// can show what narrows a route without reprinting the whole block.
+func matchSummary(ms []deployspec.Match) string {
+	parts := make([]string, 0, len(ms))
+	for _, m := range ms {
+		switch {
+		case m.PathPrefix != "":
+			parts = append(parts, "path "+m.PathPrefix)
+		case m.PathRegexp != "":
+			parts = append(parts, "path ~ "+m.PathRegexp)
+		case m.Header != "":
+			parts = append(parts, m.Header+" ~ "+m.Regexp)
+		case m.Query != "":
+			parts = append(parts, "?"+m.Query+" ~ "+m.Regexp)
+		case m.Method != "":
+			parts = append(parts, m.Method)
+		}
+	}
+	return strings.Join(parts, " or ")
 }

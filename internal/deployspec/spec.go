@@ -6,7 +6,10 @@
 // with a compose file, a static site) need only a handful of lines.
 package deployspec
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Filenames are the names publix looks for at the repository root.
 var Filenames = []string{"deployment.yaml", "deployment.yml", ".publix/deployment.yaml"}
@@ -93,8 +96,13 @@ type Spec struct {
 	// SNI hostnames to a port on the project's container without publix or
 	// Traefik terminating TLS — the escape hatch for a backend that serves
 	// its own certificate (a custom CA) or a protocol Traefik cannot
-	// terminate. Not supported for compose projects.
+	// terminate.
 	TCP []TCPRoute `yaml:"tcp,omitempty"`
+
+	// Ports publishes container ports on the server, for a protocol that
+	// carries nothing a reverse proxy could route on — git over SSH being
+	// the usual reason.
+	Ports []Port `yaml:"ports,omitempty"`
 
 	// Volumes attach server-registered shared volumes. A bare name mounts
 	// at /shared/<name>.
@@ -120,6 +128,42 @@ type Route struct {
 	BasicAuth  []string          `yaml:"basicAuth,omitempty"`
 	// Service overrides which compose service this route reaches.
 	Service string `yaml:"service,omitempty"`
+	// Priority decides which route wins when two of them match the same
+	// request, highest first. Traefik otherwise ranks by rule length, which
+	// is not what anyone means: a route that carves a handful of requests
+	// out of a hostname has to outrank the catch-all for that hostname, and
+	// whose rule happens to be the longer string is no way to decide it.
+	Priority int `yaml:"priority,omitempty"`
+	// MatchAny narrows a route to requests meeting at least one of these
+	// conditions, on top of the hostname. It is what lets one hostname be
+	// split across two services by something other than a path prefix —
+	// git over HTTP being the case that motivated it, where the requests
+	// belonging to the git protocol are spread across paths that otherwise
+	// belong to the web UI.
+	MatchAny []Match `yaml:"matchAny,omitempty"`
+}
+
+// Match is one alternative condition on a route. Exactly one selector is
+// set: PathPrefix, PathRegexp, Method, or Header/Query paired with Regexp.
+//
+// There is deliberately no raw Traefik rule here. A rule written by hand
+// could match a hostname the project does not own, and the whole point of
+// publix's routing is that a repository cannot claim traffic that is not
+// its own. Every condition below narrows a route that is already anchored
+// to a host publix checked.
+type Match struct {
+	// PathPrefix matches requests whose path starts with this.
+	PathPrefix string `yaml:"pathPrefix,omitempty"`
+	// PathRegexp matches the path against a regular expression.
+	PathRegexp string `yaml:"pathRegexp,omitempty"`
+	// Header names a header matched against Regexp.
+	Header string `yaml:"header,omitempty"`
+	// Query names a query parameter matched against Regexp.
+	Query string `yaml:"query,omitempty"`
+	// Regexp is the pattern for Header or Query.
+	Regexp string `yaml:"regexp,omitempty"`
+	// Method matches the HTTP method, e.g. POST.
+	Method string `yaml:"method,omitempty"`
 }
 
 // TCPRoute forwards TLS connections to the container by SNI, without
@@ -128,13 +172,61 @@ type Route struct {
 // routers move with a cutover the same way HTTP hostnames do.
 type TCPRoute struct {
 	// SNI are the TLS server names this route matches.
-	SNI []string `yaml:"sni"`
+	SNI []string `yaml:"sni,omitempty"`
 	// Port is the container port connections are forwarded to.
 	Port int `yaml:"port"`
 	// Passthrough forwards the raw TLS stream untouched, so the backend
-	// terminates it. This is the only supported mode: a terminating TCP
-	// route would need publix to hold the certificate.
+	// terminates it. This is the only supported mode for an SNI route: a
+	// terminating TCP route would need publix to hold the certificate.
 	Passthrough bool `yaml:"passthrough,omitempty"`
+	// Service names which compose service the port belongs to. It is
+	// required for a compose project and meaningless for any other kind.
+	Service string `yaml:"service,omitempty"`
+}
+
+// Port publishes a container port on the server, the way `docker run -p`
+// does. It is how a project serves a protocol Traefik cannot route.
+//
+// Traefik matches TLS by SNI and HTTP by host header. A protocol that is
+// neither — git over SSH, a database wire protocol — carries nothing to
+// match on, so there is no way to share a port between projects and nothing
+// for a reverse proxy to decide. Publishing the port directly is not a
+// workaround for that; it is the only honest answer to it.
+//
+// The cost is that a published port cannot move atomically: two generations
+// of a deployment cannot both hold it. That is why a project publishing one
+// is required to use the recreate strategy, and it is enforced rather than
+// assumed, because the failure mode is a deploy that half-starts and leaves
+// the port bound by the generation being replaced.
+type Port struct {
+	// Host is the port opened on the server.
+	Host int `yaml:"host"`
+	// Container is the port inside the container. Defaults to Host.
+	Container int `yaml:"container,omitempty"`
+	// Protocol is tcp (the default) or udp.
+	Protocol string `yaml:"protocol,omitempty"`
+	// Service names which compose service owns the port. It is required
+	// for a compose project and meaningless for any other kind.
+	Service string `yaml:"service,omitempty"`
+	// Bind restricts the port to one host address. The default is every
+	// address, which is what makes the port reachable from outside.
+	Bind string `yaml:"bind,omitempty"`
+}
+
+// Target is the container port, defaulting to the host port.
+func (p Port) Target() int {
+	if p.Container > 0 {
+		return p.Container
+	}
+	return p.Host
+}
+
+// Proto is the protocol, defaulting to tcp.
+func (p Port) Proto() string {
+	if p.Protocol == "" {
+		return "tcp"
+	}
+	return strings.ToLower(p.Protocol)
 }
 
 // Volume attaches a shared volume registered on the server.

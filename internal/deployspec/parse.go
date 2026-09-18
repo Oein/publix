@@ -2,6 +2,7 @@ package deployspec
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path"
 	"path/filepath"
@@ -374,11 +375,24 @@ func (r *Resolved) validate(src framework.Source) error {
 		case !domainRe.MatchString(rt.Domain):
 			add("routes[%d].domain: %q is not a valid hostname", i, rt.Domain)
 		}
-		key := strings.ToLower(rt.Domain) + "|" + rt.Path
+		// Two routes may share a hostname when they reach different
+		// services or match different requests — that is how one host is
+		// split between a web UI and an API. What is still a mistake is two
+		// routes that are indistinguishable.
+		key := strings.ToLower(rt.Domain) + "|" + rt.Path + "|" + rt.Service + "|" + matchKey(rt.MatchAny)
 		if seen[key] {
-			add("routes[%d]: %s%s is declared twice", i, rt.Domain, rt.Path)
+			add("routes[%d]: %s%s is declared twice with the same service and conditions", i, rt.Domain, rt.Path)
 		}
 		seen[key] = true
+
+		for j, m := range rt.MatchAny {
+			for _, problem := range m.problems() {
+				add("routes[%d].matchAny[%d]: %s", i, j, problem)
+			}
+		}
+		if rt.RedirectTo != "" && len(rt.MatchAny) > 0 {
+			add("routes[%d]: redirectTo cannot be combined with matchAny", i)
+		}
 		if rt.Path != "" && !strings.HasPrefix(rt.Path, "/") {
 			add("routes[%d].path: %q must start with /", i, rt.Path)
 		}
@@ -393,8 +407,14 @@ func (r *Resolved) validate(src framework.Source) error {
 	}
 
 	for i, t := range s.TCP {
-		if s.Kind == KindCompose {
-			add("tcp[%d]: TCP routes are not supported for compose projects", i)
+		if s.Kind == KindCompose && t.Service == "" {
+			add("tcp[%d].service: is required for a compose project — name the service the port belongs to", i)
+		}
+		if s.Kind != KindCompose && t.Service != "" {
+			add("tcp[%d].service: only means something for a compose project", i)
+		}
+		if t.Port < 1 || t.Port > 65535 {
+			add("tcp[%d].port: %d must be between 1 and 65535", i, t.Port)
 		}
 		if len(t.SNI) == 0 {
 			add("tcp[%d].sni: at least one SNI hostname is required", i)
@@ -404,11 +424,49 @@ func (r *Resolved) validate(src framework.Source) error {
 				add("tcp[%d].sni[%d]: %q is not a valid hostname", i, j, h)
 			}
 		}
-		if t.Port < 1 || t.Port > 65535 {
-			add("tcp[%d].port: %d must be between 1 and 65535", i, t.Port)
-		}
 		if !t.Passthrough {
 			add("tcp[%d].passthrough: must be true — publix only supports SNI passthrough, it does not terminate TLS for TCP routes", i)
+		}
+	}
+
+	hostPorts := map[string]bool{}
+	for i, p := range s.Ports {
+		if p.Host < 1 || p.Host > 65535 {
+			add("ports[%d].host: %d must be between 1 and 65535", i, p.Host)
+		}
+		if p.Container != 0 && (p.Container < 1 || p.Container > 65535) {
+			add("ports[%d].container: %d must be between 1 and 65535", i, p.Container)
+		}
+		if proto := p.Proto(); proto != "tcp" && proto != "udp" {
+			add("ports[%d].protocol: %q is not tcp or udp", i, p.Protocol)
+		}
+		key := fmt.Sprintf("%s/%d/%s", p.Bind, p.Host, p.Proto())
+		if hostPorts[key] {
+			add("ports[%d]: %d/%s is published twice", i, p.Host, p.Proto())
+		}
+		hostPorts[key] = true
+
+		if p.Bind != "" && net.ParseIP(p.Bind) == nil {
+			add("ports[%d].bind: %q is not an IP address", i, p.Bind)
+		}
+		if s.Kind == KindCompose && p.Service == "" {
+			add("ports[%d].service: is required for a compose project — name the service the port belongs to", i)
+		}
+		if s.Kind != KindCompose && p.Service != "" {
+			add("ports[%d].service: only means something for a compose project", i)
+		}
+	}
+
+	if len(s.Ports) > 0 && s.Kind != KindCompose {
+		// A published port cannot be held by two generations at once, so
+		// blue-green would start the new one into a port the old one still
+		// owns and fail after the build, which is the worst moment to find
+		// out. Compose is already forced to recreate.
+		if s.Release.Strategy == StrategyBlueGreen {
+			add("release.strategy: must be recreate when ports are published — a host port cannot be held by two deployments at once, so the new one could not start while the old one is still serving")
+		}
+		if s.ReplicaCount() > 1 {
+			add("replicas: must be 1 when ports are published — replicas would compete for the same host port")
 		}
 	}
 
@@ -422,10 +480,20 @@ func (r *Resolved) validate(src framework.Source) error {
 		if !volNameRe.MatchString(v.Name) {
 			add("volumes[%d].name: %q must be lowercase alphanumeric with dots, dashes or underscores", i, v.Name)
 		}
-		if volSeen[v.Name] {
-			add("volumes[%d]: %q is attached twice", i, v.Name)
+		// One volume may be attached more than once when the attachments
+		// reach different subdirectories: a stack can legitimately want a
+		// database's data and an application's state on the same disk
+		// without the two sharing a directory. What is still a mistake is
+		// the same subdirectory attached twice.
+		vk := v.Name + "|" + v.SubPath
+		if volSeen[vk] {
+			if v.SubPath == "" {
+				add("volumes[%d]: %q is attached twice", i, v.Name)
+			} else {
+				add("volumes[%d]: %q/%s is attached twice", i, v.Name, v.SubPath)
+			}
 		}
-		volSeen[v.Name] = true
+		volSeen[vk] = true
 
 		m := v.Mount()
 		if !strings.HasPrefix(m, "/") {
@@ -594,4 +662,67 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// problems reports what is wrong with one match condition, if anything.
+//
+// Exactly one selector may be set. Accepting several would mean guessing
+// whether they were meant to be combined with and or or, and either guess
+// would silently route somebody's traffic the way they did not ask.
+func (m Match) problems() []string {
+	var out []string
+
+	set := 0
+	for _, v := range []string{m.PathPrefix, m.PathRegexp, m.Header, m.Query, m.Method} {
+		if v != "" {
+			set++
+		}
+	}
+	switch {
+	case set == 0:
+		return []string{"needs one of pathPrefix, pathRegexp, header, query or method"}
+	case set > 1:
+		out = append(out, "set only one of pathPrefix, pathRegexp, header, query or method — list them as separate entries to match any of them")
+	}
+
+	if m.PathPrefix != "" && !strings.HasPrefix(m.PathPrefix, "/") {
+		out = append(out, fmt.Sprintf("pathPrefix: %q must start with /", m.PathPrefix))
+	}
+	if m.PathRegexp != "" {
+		if _, err := regexp.Compile(m.PathRegexp); err != nil {
+			out = append(out, fmt.Sprintf("pathRegexp: %q is not a valid regular expression: %v", m.PathRegexp, err))
+		}
+	}
+
+	// Header and query match a value, so they are the only two that take a
+	// pattern — and they are useless without one.
+	needsRegexp := m.Header != "" || m.Query != ""
+	switch {
+	case needsRegexp && m.Regexp == "":
+		out = append(out, "regexp: is required with header or query")
+	case !needsRegexp && m.Regexp != "":
+		out = append(out, "regexp: only means something with header or query")
+	}
+	if m.Regexp != "" {
+		if _, err := regexp.Compile(m.Regexp); err != nil {
+			out = append(out, fmt.Sprintf("regexp: %q is not a valid regular expression: %v", m.Regexp, err))
+		}
+	}
+
+	if m.Method != "" && strings.ToUpper(m.Method) != m.Method {
+		out = append(out, fmt.Sprintf("method: %q must be upper case", m.Method))
+	}
+	return out
+}
+
+// matchKey fingerprints a set of conditions so two routes that differ only
+// in what they match are not mistaken for duplicates.
+func matchKey(ms []Match) string {
+	parts := make([]string, 0, len(ms))
+	for _, m := range ms {
+		parts = append(parts, strings.Join([]string{
+			m.PathPrefix, m.PathRegexp, m.Header, m.Query, m.Regexp, m.Method,
+		}, "\x1f"))
+	}
+	return strings.Join(parts, "\x1e")
 }

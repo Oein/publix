@@ -346,6 +346,12 @@ func (e *Engine) run(ctx context.Context, projectID, deploymentID string, opt Op
 	if err := e.loadSpec(dc, opt); err != nil {
 		return err
 	}
+	// Catch a port another project already publishes before spending a
+	// build on it. Docker would refuse the bind at the very end, after the
+	// image was built, with a message that names neither project.
+	if err := e.checkPortConflicts(dc); err != nil {
+		return err
+	}
 	if err := e.prepare(ctx, dc); err != nil {
 		return err
 	}

@@ -129,6 +129,16 @@ type HostConfig struct {
 	AutoRemove        bool           `json:"AutoRemove,omitempty"`
 	LogConfig         *LogConfig     `json:"LogConfig,omitempty"`
 	Mounts            []Mount        `json:"Mounts,omitempty"`
+	// PortBindings publishes container ports on the host, keyed by
+	// "<port>/<proto>" the way the Docker API expects.
+	PortBindings map[string][]PortBinding `json:"PortBindings,omitempty"`
+}
+
+// PortBinding is one host address a container port is published on. An empty
+// HostIP means every address, which is Docker's own default.
+type PortBinding struct {
+	HostIP   string `json:"HostIp,omitempty"`
+	HostPort string `json:"HostPort"`
 }
 
 // RestartPolicy tells Docker how to react to a container exiting.

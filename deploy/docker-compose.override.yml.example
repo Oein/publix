@@ -28,3 +28,38 @@ services:
   # traefik:
   #   volumes:
   #     - /etc/ssl/private:/etc/ssl/private:ro
+
+  # A raw TCP entry point, for a project with a `tcp:` route that names an
+  # `entryPoint` — git over SSH being the usual reason.
+  #
+  # publix writes Traefik's *dynamic* configuration, never its static
+  # configuration, so the entry point itself has to be declared here and the
+  # port published. The name must match the one in deployment.yaml, and the
+  # entry point must be dedicated: everything arriving on it is forwarded to
+  # that one project, because a protocol that is not TLS offers nothing to
+  # tell connections apart by.
+  #
+  # traefik:
+  #   command:
+  #     # Compose replaces the whole command list rather than appending to
+  #     # it, so copy every flag from deploy/docker-compose.yml and add
+  #     # yours at the end. Leaving one out silently disables it.
+  #     - --providers.docker=true
+  #     - --providers.docker.exposedByDefault=false
+  #     - --providers.docker.network=publix
+  #     - --providers.file.directory=/etc/traefik/dynamic
+  #     - --providers.file.watch=true
+  #     - --entrypoints.web.address=:80
+  #     - --entrypoints.web.http.redirections.entrypoint.to=websecure
+  #     - --entrypoints.web.http.redirections.entrypoint.scheme=https
+  #     - --entrypoints.websecure.address=:443
+  #     - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}
+  #     - --certificatesresolvers.letsencrypt.acme.storage=/acme/acme.json
+  #     - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+  #     - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+  #     - --log.level=INFO
+  #     - --entrypoints.gitssh.address=:2222
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #     - "2222:2222"

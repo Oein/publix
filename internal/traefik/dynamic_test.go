@@ -656,3 +656,131 @@ func TestTCPCutoverRepointsService(t *testing.T) {
 		t.Errorf("service did not repoint: before=%q after=%q", svc(before), svc(after))
 	}
 }
+
+// The case this was built for: one hostname split between a web UI and the
+// API beside it, where the API's requests are spread across paths that
+// otherwise belong to the UI. A path prefix cannot express that.
+func TestOneHostSplitAcrossTwoServices(t *testing.T) {
+	set := settings()
+	d := Build(set, []Live{{
+		Project: project("giten"),
+		Spec: spec(t, `
+type: compose
+compose: docker-compose.yml
+service: frontend
+port: 3000
+routes:
+  - domain: git.example.com
+    service: backend
+    priority: 110
+    matchAny:
+      - pathPrefix: /api
+      - header: Content-Type
+        regexp: application/x-git.*
+      - pathRegexp: /.+/.+/info/refs
+  - domain: git.example.com
+    service: frontend
+    priority: 100
+`),
+		Deployment: "dep1",
+	}})
+
+	var api, web *Router
+	for _, r := range d.HTTP.Routers {
+		switch r.Priority {
+		case 110:
+			api = r
+		case 100:
+			web = r
+		}
+	}
+	if api == nil || web == nil {
+		t.Fatalf("expected two routers with distinct priorities, got %d routers", len(d.HTTP.Routers))
+	}
+
+	// Both are anchored to the host; only the high-priority one narrows.
+	for _, r := range []*Router{api, web} {
+		if !strings.HasPrefix(r.Rule, "Host(`git.example.com`)") {
+			t.Errorf("rule is not anchored to the host: %q", r.Rule)
+		}
+	}
+	for _, want := range []string{
+		"PathPrefix(`/api`)",
+		"HeaderRegexp(`Content-Type`, `application/x-git.*`)",
+		"PathRegexp(`/.+/.+/info/refs`)",
+		" || ",
+	} {
+		if !strings.Contains(api.Rule, want) {
+			t.Errorf("rule is missing %s:\n%s", want, api.Rule)
+		}
+	}
+	if strings.Contains(web.Rule, "||") {
+		t.Errorf("the catch-all route should not be narrowed: %q", web.Rule)
+	}
+	if api.Service == web.Service {
+		t.Errorf("both routers point at %q; they should reach different services", api.Service)
+	}
+}
+
+// Two routes on one hostname are only a duplicate when nothing tells them
+// apart. Dropping one because the domain repeated would silently delete
+// half of a split.
+func TestRoutesOnOneHostSurviveDeduplication(t *testing.T) {
+	set := settings()
+	routes := Hosts(set, project("giten"), spec(t, `
+routes:
+  - domain: git.example.com
+    service: backend
+    matchAny:
+      - pathPrefix: /api
+  - domain: git.example.com
+    service: frontend
+  - domain: git.example.com
+    service: frontend
+`))
+
+	count := 0
+	for _, r := range routes {
+		if r.Domain == "git.example.com" {
+			count++
+		}
+	}
+	// Two distinct routes survive; the exact repeat of the second is gone.
+	if count != 2 {
+		t.Fatalf("kept %d routes for the host, want 2: %+v", count, routes)
+	}
+}
+
+// An SNI route still behaves as it did: entry points from settings, and
+// passthrough set.
+func TestSNIRouteStillPassesThrough(t *testing.T) {
+	set := settings()
+	d := Build(set, []Live{{
+		Project: project("mail"),
+		Spec: spec(t, `
+port: 8080
+tcp:
+  - sni: [mail.example.com]
+    port: 993
+    passthrough: true
+`),
+		Deployment: "dep1",
+	}})
+
+	var r *TCPRouter
+	for _, v := range d.TCP.Routers {
+		r = v
+	}
+	if r == nil {
+		t.Fatal("no TCP router")
+	}
+	if r.Rule != "HostSNI(`mail.example.com`)" {
+		t.Errorf("rule = %q", r.Rule)
+	}
+	if r.TLS == nil || !r.TLS.Passthrough {
+		t.Errorf("TLS = %+v, want passthrough", r.TLS)
+	}
+	if len(r.EntryPoints) != 1 || r.EntryPoints[0] != "websecure" {
+		t.Errorf("entryPoints = %v, want the configured ones", r.EntryPoints)
+	}
+}
