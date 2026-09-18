@@ -408,9 +408,10 @@ A project can also declare its own redirects in `deployment.yaml` (see
 it; these belong to the server and outlive any project.
 
 **Harder cases.** One hostname can be split across the services of a compose
-stack by priority and request-matching conditions, and a project can claim a
-raw TCP port for a protocol that is not HTTP — git over SSH being the usual
-reason. Both live in `deployment.yaml`; see
+stack by priority and request-matching conditions, and a project can publish
+a port directly for a protocol no reverse proxy can route — git over SSH
+being the usual reason. Both are declared in the repository's own
+`deployment.yaml`, with nothing to configure on the server; see
 [docs/routing.md](docs/routing.md).
 
 ## The command line

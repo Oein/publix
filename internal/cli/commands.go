@@ -427,14 +427,24 @@ func cmdValidate(ctx context.Context, args []string) error {
 		if i > 0 {
 			label = "   "
 		}
-		var line string
-		if t.Raw() {
-			line = fmt.Sprintf("entrypoint %s → port %d", t.EntryPoint, t.Port)
-		} else {
-			line = fmt.Sprintf("sni %s → port %d (passthrough)", strings.Join(t.SNI, ", "), t.Port)
-		}
+		line := fmt.Sprintf("sni %s → port %d (passthrough)", strings.Join(t.SNI, ", "), t.Port)
 		if t.Service != "" {
 			line += " on " + t.Service
+		}
+		fmt.Printf("  %-11s %s\n", label, line)
+	}
+	for i, p := range resolved.Ports {
+		label := "ports"
+		if i > 0 {
+			label = "     "
+		}
+		host := fmt.Sprintf("%d", p.Host)
+		if p.Bind != "" {
+			host = p.Bind + ":" + host
+		}
+		line := fmt.Sprintf("%s → %d/%s", host, p.Target(), p.Proto())
+		if p.Service != "" {
+			line += " on " + p.Service
 		}
 		fmt.Printf("  %-11s %s\n", label, line)
 	}

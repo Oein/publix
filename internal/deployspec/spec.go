@@ -6,7 +6,10 @@
 // with a compose file, a static site) need only a handful of lines.
 package deployspec
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Filenames are the names publix looks for at the repository root.
 var Filenames = []string{"deployment.yaml", "deployment.yml", ".publix/deployment.yaml"}
@@ -93,8 +96,13 @@ type Spec struct {
 	// SNI hostnames to a port on the project's container without publix or
 	// Traefik terminating TLS — the escape hatch for a backend that serves
 	// its own certificate (a custom CA) or a protocol Traefik cannot
-	// terminate. Not supported for compose projects.
+	// terminate.
 	TCP []TCPRoute `yaml:"tcp,omitempty"`
+
+	// Ports publishes container ports on the server, for a protocol that
+	// carries nothing a reverse proxy could route on — git over SSH being
+	// the usual reason.
+	Ports []Port `yaml:"ports,omitempty"`
 
 	// Volumes attach server-registered shared volumes. A bare name mounts
 	// at /shared/<name>.
@@ -171,26 +179,55 @@ type TCPRoute struct {
 	// terminates it. This is the only supported mode for an SNI route: a
 	// terminating TCP route would need publix to hold the certificate.
 	Passthrough bool `yaml:"passthrough,omitempty"`
-	// EntryPoint forwards every connection arriving on one dedicated
-	// Traefik entry point, with no TLS anywhere in the path.
-	//
-	// SNI is a TLS field, so a protocol that is not TLS — git over SSH, a
-	// database wire protocol — offers nothing to match on and can only be
-	// told apart by the port it arrived on. That is what this is for, and
-	// it is why the entry point has to be dedicated: everything reaching it
-	// goes to this one project.
-	//
-	// The entry point must exist in Traefik's static configuration, which
-	// publix does not write. See docs/routing.md.
-	EntryPoint string `yaml:"entryPoint,omitempty"`
 	// Service names which compose service the port belongs to. It is
 	// required for a compose project and meaningless for any other kind.
 	Service string `yaml:"service,omitempty"`
 }
 
-// Raw reports whether the route forwards a non-TLS protocol on a dedicated
-// entry point rather than matching TLS SNI.
-func (t TCPRoute) Raw() bool { return t.EntryPoint != "" }
+// Port publishes a container port on the server, the way `docker run -p`
+// does. It is how a project serves a protocol Traefik cannot route.
+//
+// Traefik matches TLS by SNI and HTTP by host header. A protocol that is
+// neither — git over SSH, a database wire protocol — carries nothing to
+// match on, so there is no way to share a port between projects and nothing
+// for a reverse proxy to decide. Publishing the port directly is not a
+// workaround for that; it is the only honest answer to it.
+//
+// The cost is that a published port cannot move atomically: two generations
+// of a deployment cannot both hold it. That is why a project publishing one
+// is required to use the recreate strategy, and it is enforced rather than
+// assumed, because the failure mode is a deploy that half-starts and leaves
+// the port bound by the generation being replaced.
+type Port struct {
+	// Host is the port opened on the server.
+	Host int `yaml:"host"`
+	// Container is the port inside the container. Defaults to Host.
+	Container int `yaml:"container,omitempty"`
+	// Protocol is tcp (the default) or udp.
+	Protocol string `yaml:"protocol,omitempty"`
+	// Service names which compose service owns the port. It is required
+	// for a compose project and meaningless for any other kind.
+	Service string `yaml:"service,omitempty"`
+	// Bind restricts the port to one host address. The default is every
+	// address, which is what makes the port reachable from outside.
+	Bind string `yaml:"bind,omitempty"`
+}
+
+// Target is the container port, defaulting to the host port.
+func (p Port) Target() int {
+	if p.Container > 0 {
+		return p.Container
+	}
+	return p.Host
+}
+
+// Proto is the protocol, defaulting to tcp.
+func (p Port) Proto() string {
+	if p.Protocol == "" {
+		return "tcp"
+	}
+	return strings.ToLower(p.Protocol)
+}
 
 // Volume attaches a shared volume registered on the server.
 //

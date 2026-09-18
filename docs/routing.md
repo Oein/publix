@@ -69,16 +69,12 @@ condition above narrows a route already anchored to a host publix checked.
 
 ---
 
-## A protocol that is not HTTP
+## A protocol that is not HTTP, but is TLS
 
-`tcp:` forwards raw connections. It has two modes, and which one you need
-depends on whether there is TLS involved.
-
-### By TLS SNI
-
-For a backend that serves its own certificate — a custom CA, or a non-HTTP
-protocol wrapped in TLS. Traefik reads the server name from the TLS
-handshake and forwards the stream untouched:
+`tcp:` forwards raw TLS connections by SNI — for a backend that serves its
+own certificate (a custom CA), or a non-HTTP protocol wrapped in
+TLS. Traefik reads the server name from the handshake and forwards the
+stream untouched:
 
 ```yaml
 tcp:
@@ -88,57 +84,71 @@ tcp:
 ```
 
 `passthrough: true` is required. publix never terminates TLS for a TCP
-route, because that would mean holding the certificate.
+route, because that would mean holding the certificate. For a compose stack,
+add `service:` to say which container owns the port.
 
-### By dedicated entry point
+---
 
-For a protocol that is not TLS at all — git over SSH, a database wire
-protocol. There is no server name in the handshake, so nothing distinguishes
-one connection from another except the port it arrived on:
+## A protocol Traefik cannot route at all
 
-```yaml
-tcp:
-  - entryPoint: gitssh
-    port: 2222
-    service: backend     # required for a compose stack
-```
-
-Everything arriving on that entry point goes to this one project. The entry
-point must therefore be **dedicated** — publix refuses two routes claiming
-the same one, but it cannot stop you from pointing a shared entry point at a
-project, so do not.
-
-**You have to declare the entry point yourself.** publix writes Traefik's
-*dynamic* configuration; entry points live in its *static* configuration,
-which publix does not own. In `deploy/docker-compose.override.yml`:
+`ports:` publishes a container port on the server, the way `docker run -p`
+does:
 
 ```yaml
-services:
-  traefik:
-    command:
-      # Compose replaces the command list rather than appending to it, so
-      # copy every flag from deploy/docker-compose.yml first.
-      - ...
-      - --entrypoints.gitssh.address=:2222
-    ports:
-      - "80:80"
-      - "443:443"
-      - "2222:2222"
+ports:
+  - host: 2222
+    container: 2222     # defaults to host
+    service: backend    # required for a compose stack
+    protocol: tcp       # tcp (default) or udp
+    bind: 127.0.0.1     # defaults to every address
 ```
 
-The name in `--entrypoints.<name>.address` must match `entryPoint:` in
-deployment.yaml. Get it wrong and Traefik quietly drops the router: the port
-answers nothing, with no error in publix.
+Adding that to `deployment.yaml` is the whole configuration. There is
+nothing to register on the server, no Traefik entry point to declare and
+nothing to restart — which is the point: a repository describes its own
+deployment, and a port is part of that.
 
-`deploy/docker-compose.override.yml.example` carries a copy of this with
-every flag filled in.
+**Why not route it through Traefik?** Traefik matches TLS by SNI and HTTP by
+host header. A protocol that is neither — git over SSH, a database wire
+protocol — carries nothing to match on. There is no way to share a port
+between projects and nothing for a reverse proxy to decide, so publishing
+the port directly is not a workaround; it is the only honest answer.
+
+### What it costs
+
+A published port cannot move atomically. Two generations of a deployment
+cannot both hold it, so a project publishing a port must use the recreate
+strategy, and publix enforces that rather than assuming it:
+
+```
+release.strategy: must be recreate when ports are published — a host port
+cannot be held by two deployments at once, so the new one could not start
+while the old one is still serving
+```
+
+Compose projects are already forced to recreate, so this only constrains the
+other kinds. `replicas:` must be 1 for the same reason.
+
+This means a deploy that publishes a port has a gap: the old container stops
+before the new one starts. HTTP traffic for the same project still cuts over
+atomically — only the published port blinks.
+
+Two projects cannot publish the same port. publix refuses the second at
+deploy time, before spending a build on it, naming both projects — Docker
+would refuse the bind too, but only after the image was built and with a
+message naming neither.
 
 ---
 
 ## What still moves atomically
 
-Both kinds of route keep publix's central property. The container's labels
-define the service; the routers that point at it live in the file publix
-owns. A cutover rewrites that file and Traefik reloads it — the containers
-are never recreated to move traffic, and a TCP route follows a rollback the
-same way a hostname does.
+Everything Traefik routes keeps publix's central property. The container's
+labels define the service; the routers that point at it live in the file
+publix owns. A cutover rewrites that file and Traefik reloads it — the
+containers are never recreated to move traffic, and an SNI route follows a
+rollback the same way a hostname does.
+
+A published port is the one exception, and it is inherent rather than a
+shortcut: a port is held by a process, not named in a file, so it cannot be
+in two places at once. That is the trade `ports:` makes, and the reason it
+is a separate section rather than another kind of route.

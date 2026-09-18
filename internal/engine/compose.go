@@ -105,6 +105,13 @@ func (e *Engine) writeComposeOverride(dc *Context, f *compose.File) (string, err
 		}
 		tcpByService[t.Service] = append(tcpByService[t.Service], t)
 	}
+	portsByService := map[string][]deployspec.Port{}
+	for _, port := range dc.Spec.Ports {
+		if port.Service == "" {
+			continue
+		}
+		portsByService[port.Service] = append(portsByService[port.Service], port)
+	}
 
 	envMapping := envMap(env)
 	services := map[string]any{}
@@ -146,6 +153,16 @@ func (e *Engine) writeComposeOverride(dc *Context, f *compose.File) (string, err
 		if len(envMapping) > 0 {
 			svc["environment"] = envMapping
 		}
+		// Compose merges `ports` by appending, so a port declared here sits
+		// beside anything the repository's own compose file publishes rather
+		// than replacing it.
+		if published := portsByService[name]; len(published) > 0 {
+			out := make([]string, 0, len(published))
+			for _, port := range published {
+				out = append(out, composePort(port))
+			}
+			svc["ports"] = out
+		}
 		if mounts := bindsForService(binds, name); len(mounts) > 0 {
 			vols := make([]string, 0, len(mounts))
 			for _, b := range mounts {
@@ -174,6 +191,15 @@ func (e *Engine) writeComposeOverride(dc *Context, f *compose.File) (string, err
 		return "", err
 	}
 	return path, nil
+}
+
+// composePort renders one published port in compose's short syntax.
+func composePort(p deployspec.Port) string {
+	host := itoa(p.Host)
+	if p.Bind != "" {
+		host = p.Bind + ":" + host
+	}
+	return host + ":" + itoa(p.Target()) + "/" + p.Proto()
 }
 
 // routedServices names every compose service Traefik has to reach: the

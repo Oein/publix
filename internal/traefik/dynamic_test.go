@@ -751,49 +751,6 @@ routes:
 	}
 }
 
-// A non-TLS protocol has no SNI to match, so a dedicated entry point is the
-// only thing that can tell its connections apart.
-func TestRawTCPRouteUsesItsOwnEntryPoint(t *testing.T) {
-	set := settings()
-	d := Build(set, []Live{{
-		Project: project("giten"),
-		Spec: spec(t, `
-type: compose
-compose: docker-compose.yml
-service: frontend
-port: 3000
-tcp:
-  - entryPoint: gitssh
-    port: 2222
-    service: backend
-`),
-		Deployment: "dep1",
-	}})
-
-	if d.TCP == nil || len(d.TCP.Routers) != 1 {
-		t.Fatalf("expected one TCP router, got %+v", d.TCP)
-	}
-	var r *TCPRouter
-	for _, v := range d.TCP.Routers {
-		r = v
-	}
-	if r.Rule != "HostSNI(`*`)" {
-		t.Errorf("rule = %q, want a catch-all — there is no SNI on a non-TLS connection", r.Rule)
-	}
-	if len(r.EntryPoints) != 1 || r.EntryPoints[0] != "gitssh" {
-		t.Errorf("entryPoints = %v, want only the dedicated one", r.EntryPoints)
-	}
-	// Passing TLS through would be a claim that there is TLS to pass.
-	if r.TLS != nil {
-		t.Errorf("TLS = %+v, want none on a raw TCP route", r.TLS)
-	}
-	// The service must name the compose service that owns the port, not the
-	// stack's primary service.
-	if !strings.Contains(r.Service, "backend") {
-		t.Errorf("service = %q, want the compose service owning the port", r.Service)
-	}
-}
-
 // An SNI route still behaves as it did: entry points from settings, and
 // passthrough set.
 func TestSNIRouteStillPassesThrough(t *testing.T) {

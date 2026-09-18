@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Oein/publix/internal/deployspec"
 	"github.com/Oein/publix/internal/store"
 	"github.com/Oein/publix/internal/traefik"
 )
@@ -199,4 +200,49 @@ func (h *harness) oneComposeContainer(ctx context.Context, p *store.Project, ser
 		h.t.Fatalf("got %d containers for compose service %q, want 1", len(containers), service)
 	}
 	return containers[0].ID
+}
+
+// A published port has to reach the generated override in compose's own
+// short syntax, or the stack comes up with the port unbound.
+func TestComposePortRendering(t *testing.T) {
+	for _, tc := range []struct {
+		port deployspec.Port
+		want string
+	}{
+		{deployspec.Port{Host: 2222}, "2222:2222/tcp"},
+		{deployspec.Port{Host: 2222, Container: 22}, "2222:22/tcp"},
+		{deployspec.Port{Host: 5432, Protocol: "udp"}, "5432:5432/udp"},
+		{deployspec.Port{Host: 2222, Bind: "127.0.0.1"}, "127.0.0.1:2222:2222/tcp"},
+	} {
+		if got := composePort(tc.port); got != tc.want {
+			t.Errorf("composePort(%+v) = %q, want %q", tc.port, got, tc.want)
+		}
+	}
+}
+
+// A service reached only over TCP has no hostname pointing at it, but it is
+// still routed — and it must be both labelled and attached to the network
+// Traefik can see, which is why both callers share this.
+func TestRoutedServicesIncludesTCPOnlyServices(t *testing.T) {
+	sp, err := deployspec.Parse([]byte(`
+type: compose
+compose: docker-compose.yml
+service: frontend
+port: 3000
+tcp:
+  - sni: [git.example.com]
+    port: 2222
+    passthrough: true
+    service: backend
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	routed := routedServices(&deployspec.Resolved{Spec: sp})
+	if !routed["backend"] {
+		t.Error("a service reached only over TCP was not treated as routed")
+	}
+	if !routed["frontend"] {
+		t.Error("the primary service was dropped")
+	}
 }

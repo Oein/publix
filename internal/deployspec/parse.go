@@ -2,6 +2,7 @@ package deployspec
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path"
 	"path/filepath"
@@ -405,7 +406,6 @@ func (r *Resolved) validate(src framework.Source) error {
 		}
 	}
 
-	entryPoints := map[string]bool{}
 	for i, t := range s.TCP {
 		if s.Kind == KindCompose && t.Service == "" {
 			add("tcp[%d].service: is required for a compose project — name the service the port belongs to", i)
@@ -416,28 +416,8 @@ func (r *Resolved) validate(src framework.Source) error {
 		if t.Port < 1 || t.Port > 65535 {
 			add("tcp[%d].port: %d must be between 1 and 65535", i, t.Port)
 		}
-
-		if t.Raw() {
-			// A dedicated entry point is the matcher, so there is nothing
-			// to match and no TLS to pass through.
-			if len(t.SNI) > 0 {
-				add("tcp[%d]: sni and entryPoint are alternatives — an entryPoint route forwards everything arriving on that port, so there is nothing to match", i)
-			}
-			if t.Passthrough {
-				add("tcp[%d].passthrough: means nothing on an entryPoint route — nothing in the path is TLS", i)
-			}
-			if !entryPointRe.MatchString(t.EntryPoint) {
-				add("tcp[%d].entryPoint: %q is not a valid entry point name", i, t.EntryPoint)
-			}
-			if entryPoints[t.EntryPoint] {
-				add("tcp[%d].entryPoint: %q is claimed twice — an entry point forwards to exactly one port", i, t.EntryPoint)
-			}
-			entryPoints[t.EntryPoint] = true
-			continue
-		}
-
 		if len(t.SNI) == 0 {
-			add("tcp[%d]: needs either sni hostnames or an entryPoint", i)
+			add("tcp[%d].sni: at least one SNI hostname is required", i)
 		}
 		for j, h := range t.SNI {
 			if !domainRe.MatchString(h) {
@@ -446,6 +426,47 @@ func (r *Resolved) validate(src framework.Source) error {
 		}
 		if !t.Passthrough {
 			add("tcp[%d].passthrough: must be true — publix only supports SNI passthrough, it does not terminate TLS for TCP routes", i)
+		}
+	}
+
+	hostPorts := map[string]bool{}
+	for i, p := range s.Ports {
+		if p.Host < 1 || p.Host > 65535 {
+			add("ports[%d].host: %d must be between 1 and 65535", i, p.Host)
+		}
+		if p.Container != 0 && (p.Container < 1 || p.Container > 65535) {
+			add("ports[%d].container: %d must be between 1 and 65535", i, p.Container)
+		}
+		if proto := p.Proto(); proto != "tcp" && proto != "udp" {
+			add("ports[%d].protocol: %q is not tcp or udp", i, p.Protocol)
+		}
+		key := fmt.Sprintf("%s/%d/%s", p.Bind, p.Host, p.Proto())
+		if hostPorts[key] {
+			add("ports[%d]: %d/%s is published twice", i, p.Host, p.Proto())
+		}
+		hostPorts[key] = true
+
+		if p.Bind != "" && net.ParseIP(p.Bind) == nil {
+			add("ports[%d].bind: %q is not an IP address", i, p.Bind)
+		}
+		if s.Kind == KindCompose && p.Service == "" {
+			add("ports[%d].service: is required for a compose project — name the service the port belongs to", i)
+		}
+		if s.Kind != KindCompose && p.Service != "" {
+			add("ports[%d].service: only means something for a compose project", i)
+		}
+	}
+
+	if len(s.Ports) > 0 && s.Kind != KindCompose {
+		// A published port cannot be held by two generations at once, so
+		// blue-green would start the new one into a port the old one still
+		// owns and fail after the build, which is the worst moment to find
+		// out. Compose is already forced to recreate.
+		if s.Release.Strategy == StrategyBlueGreen {
+			add("release.strategy: must be recreate when ports are published — a host port cannot be held by two deployments at once, so the new one could not start while the old one is still serving")
+		}
+		if s.ReplicaCount() > 1 {
+			add("replicas: must be 1 when ports are published — replicas would compete for the same host port")
 		}
 	}
 
@@ -459,10 +480,20 @@ func (r *Resolved) validate(src framework.Source) error {
 		if !volNameRe.MatchString(v.Name) {
 			add("volumes[%d].name: %q must be lowercase alphanumeric with dots, dashes or underscores", i, v.Name)
 		}
-		if volSeen[v.Name] {
-			add("volumes[%d]: %q is attached twice", i, v.Name)
+		// One volume may be attached more than once when the attachments
+		// reach different subdirectories: a stack can legitimately want a
+		// database's data and an application's state on the same disk
+		// without the two sharing a directory. What is still a mistake is
+		// the same subdirectory attached twice.
+		vk := v.Name + "|" + v.SubPath
+		if volSeen[vk] {
+			if v.SubPath == "" {
+				add("volumes[%d]: %q is attached twice", i, v.Name)
+			} else {
+				add("volumes[%d]: %q/%s is attached twice", i, v.Name, v.SubPath)
+			}
 		}
-		volSeen[v.Name] = true
+		volSeen[vk] = true
 
 		m := v.Mount()
 		if !strings.HasPrefix(m, "/") {
@@ -632,11 +663,6 @@ func firstNonEmpty(vals ...string) string {
 	}
 	return ""
 }
-
-// entryPointRe matches a Traefik entry point name. Traefik itself is
-// permissive here, but a name is written into a router reference and into
-// a generated key, so keep it to what reads unambiguously in both.
-var entryPointRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$`)
 
 // problems reports what is wrong with one match condition, if anything.
 //

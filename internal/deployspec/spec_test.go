@@ -485,8 +485,9 @@ compose: docker-compose.yml
 service: frontend
 port: 3000
 tcp:
-  - entryPoint: gitssh
+  - sni: [git.example.com]
     port: 2222
+    passthrough: true
 `, composeFiles())
 	if !strings.Contains(msg, "service") {
 		t.Errorf("unhelpful message: %s", msg)
@@ -502,67 +503,171 @@ compose: docker-compose.yml
 service: frontend
 port: 3000
 tcp:
-  - entryPoint: gitssh
-    port: 2222
-    service: backend
-`, composeFiles())
-	if len(r.TCP) != 1 || !r.TCP[0].Raw() {
-		t.Fatalf("TCP = %+v, want one raw route", r.TCP)
-	}
-}
-
-// sni and entryPoint answer the same question in incompatible ways.
-func TestTCPRouteRejectsSNIAndEntryPointTogether(t *testing.T) {
-	msg := resolveErr(t, `
-port: 8080
-tcp:
-  - entryPoint: gitssh
-    sni: [git.example.com]
-    port: 2222
-`, map[string]string{"Dockerfile": "FROM alpine\n"})
-	if !strings.Contains(msg, "alternatives") {
-		t.Errorf("unhelpful message: %s", msg)
-	}
-}
-
-// An entry point forwards everything arriving on it, so two projects
-// claiming one would silently steal each other's connections.
-func TestTCPEntryPointCannotBeClaimedTwice(t *testing.T) {
-	msg := resolveErr(t, `
-port: 8080
-tcp:
-  - entryPoint: gitssh
-    port: 2222
-  - entryPoint: gitssh
-    port: 2223
-`, map[string]string{"Dockerfile": "FROM alpine\n"})
-	if !strings.Contains(msg, "claimed twice") {
-		t.Errorf("unhelpful message: %s", msg)
-	}
-}
-
-// passthrough is a TLS concept; on a raw route there is no TLS to pass.
-func TestRawTCPRouteRejectsPassthrough(t *testing.T) {
-	msg := resolveErr(t, `
-port: 8080
-tcp:
-  - entryPoint: gitssh
+  - sni: [git.example.com]
     port: 2222
     passthrough: true
+    service: backend
+`, composeFiles())
+	if len(r.TCP) != 1 {
+		t.Fatalf("TCP = %+v, want one route", r.TCP)
+	}
+}
+
+// The whole point of `ports:`: a repository adds one file and gets a
+// published port, with no server-side configuration to go with it.
+func TestPublishedPortNeedsNothingButTheSpec(t *testing.T) {
+	r := resolve(t, `
+type: compose
+compose: docker-compose.yml
+service: frontend
+port: 3000
+release:
+  strategy: recreate
+ports:
+  - host: 2222
+    service: backend
+`, composeFiles())
+	if len(r.Ports) != 1 {
+		t.Fatalf("Ports = %+v", r.Ports)
+	}
+	// The container port defaults to the host port, and tcp is the default
+	// protocol, so the short form above is the whole configuration.
+	if got := r.Ports[0].Target(); got != 2222 {
+		t.Errorf("container port = %d, want it to default to the host port", got)
+	}
+	if got := r.Ports[0].Proto(); got != "tcp" {
+		t.Errorf("protocol = %q, want tcp", got)
+	}
+}
+
+// A host port cannot be held by two generations at once, so blue-green
+// would build an image and only then fail to start it.
+func TestPublishedPortRefusesBlueGreen(t *testing.T) {
+	msg := resolveErr(t, `
+port: 8080
+release:
+  strategy: blue-green
+ports:
+  - host: 2222
 `, map[string]string{"Dockerfile": "FROM alpine\n"})
-	if !strings.Contains(msg, "passthrough") {
+	if !strings.Contains(msg, "recreate") {
+		t.Errorf("the message does not say what to do instead: %s", msg)
+	}
+}
+
+func TestPublishedPortRefusesReplicas(t *testing.T) {
+	msg := resolveErr(t, `
+port: 8080
+replicas: 3
+release:
+  strategy: recreate
+ports:
+  - host: 2222
+`, map[string]string{"Dockerfile": "FROM alpine\n"})
+	if !strings.Contains(msg, "replicas") {
 		t.Errorf("unhelpful message: %s", msg)
 	}
 }
 
-// A TCP route with neither is not a route at all.
-func TestTCPRouteNeedsSNIOrEntryPoint(t *testing.T) {
+func TestPublishedPortRejectsDuplicates(t *testing.T) {
 	msg := resolveErr(t, `
 port: 8080
-tcp:
-  - port: 2222
+release:
+  strategy: recreate
+ports:
+  - host: 2222
+  - host: 2222
 `, map[string]string{"Dockerfile": "FROM alpine\n"})
-	if !strings.Contains(msg, "either sni hostnames or an entryPoint") {
+	if !strings.Contains(msg, "published twice") {
+		t.Errorf("unhelpful message: %s", msg)
+	}
+}
+
+// The same port on two different addresses is not a collision.
+func TestPublishedPortAllowsDistinctBinds(t *testing.T) {
+	r := resolve(t, `
+port: 8080
+release:
+  strategy: recreate
+ports:
+  - host: 2222
+    bind: 127.0.0.1
+  - host: 2222
+    bind: 10.0.0.1
+`, map[string]string{"Dockerfile": "FROM alpine\n"})
+	if len(r.Ports) != 2 {
+		t.Fatalf("Ports = %+v, want both kept", r.Ports)
+	}
+}
+
+func TestPublishedPortRejectsABadBind(t *testing.T) {
+	msg := resolveErr(t, `
+port: 8080
+release:
+  strategy: recreate
+ports:
+  - host: 2222
+    bind: not-an-ip
+`, map[string]string{"Dockerfile": "FROM alpine\n"})
+	if !strings.Contains(msg, "not an IP address") {
+		t.Errorf("unhelpful message: %s", msg)
+	}
+}
+
+// A compose stack has several containers, so a port has to say which one
+// owns it rather than being attached to a guess.
+func TestComposePublishedPortNeedsAService(t *testing.T) {
+	msg := resolveErr(t, `
+type: compose
+compose: docker-compose.yml
+service: frontend
+port: 3000
+ports:
+  - host: 2222
+`, composeFiles())
+	if !strings.Contains(msg, "service") {
+		t.Errorf("unhelpful message: %s", msg)
+	}
+}
+
+// One disk can legitimately hold two unrelated things for one stack — a
+// database's data and an application's state — without the two sharing a
+// directory. Refusing the second attachment forced them together.
+func TestOneVolumeCanBeAttachedAtSeveralSubPaths(t *testing.T) {
+	r := resolve(t, `
+type: compose
+compose: docker-compose.yml
+service: frontend
+port: 3000
+volumes:
+  - name: data-ssd
+    subPath: pgdata
+    mountPath: /var/lib/postgresql/data
+    services: [db]
+  - name: data-ssd
+    subPath: ssh
+    mountPath: /mnt/ssh
+    services: [backend]
+`, composeFiles())
+	if len(r.Volumes) != 2 {
+		t.Fatalf("Volumes = %+v, want both kept", r.Volumes)
+	}
+}
+
+// The same subdirectory twice is still a mistake, and so is the same mount
+// path from two volumes.
+func TestTheSameSubPathTwiceIsStillRejected(t *testing.T) {
+	msg := resolveErr(t, `
+port: 8080
+volumes:
+  - name: data-ssd
+    subPath: pgdata
+    mountPath: /a
+  - name: data-ssd
+    subPath: pgdata
+    mountPath: /b
+`, map[string]string{"Dockerfile": "FROM alpine\n"})
+	if !strings.Contains(msg, "attached twice") {
 		t.Errorf("unhelpful message: %s", msg)
 	}
 }

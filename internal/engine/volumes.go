@@ -141,3 +141,59 @@ func VolumeUsage(projects []*store.Project, volume string) []string {
 	sort.Strings(out)
 	return out
 }
+
+// PortUsage reports which live projects publish a host port, as
+// "project (port/proto)".
+func PortUsage(projects []*store.Project, exclude string) map[string]string {
+	out := map[string]string{}
+	for _, p := range projects {
+		if p.ID == exclude {
+			continue
+		}
+		live := p.LiveDeployment()
+		if live == nil || live.Spec == "" {
+			continue
+		}
+		sp, err := deployspec.Parse([]byte(live.Spec))
+		if err != nil {
+			continue
+		}
+		for _, port := range sp.Ports {
+			out[portKey(port)] = p.Name
+		}
+	}
+	return out
+}
+
+// portKey identifies one published port. A port bound to a specific address
+// does not collide with the same port on another address, so the address is
+// part of the identity.
+func portKey(p deployspec.Port) string {
+	return fmt.Sprintf("%s|%d/%s", p.Bind, p.Host, p.Proto())
+}
+
+// checkPortConflicts refuses a deployment that would take a host port
+// another project is already serving on.
+//
+// Docker would refuse the bind too, but only after the image is built and
+// with an error naming neither project — and by then the deploy has already
+// cost a build. Saying it here, with both names, is the difference between
+// a typo and an afternoon.
+func (e *Engine) checkPortConflicts(dc *Context) error {
+	if len(dc.Spec.Ports) == 0 {
+		return nil
+	}
+	taken := PortUsage(e.store.Projects(), dc.Project.ID)
+	for _, port := range dc.Spec.Ports {
+		if owner, clash := taken[portKey(port)]; clash {
+			where := "every address"
+			if port.Bind != "" {
+				where = port.Bind
+			}
+			return fmt.Errorf(
+				"port %d/%s on %s is already published by the project %q — two projects cannot hold one port",
+				port.Host, port.Proto(), where, owner)
+		}
+	}
+	return nil
+}

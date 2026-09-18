@@ -425,25 +425,16 @@ func buildProject(d *Dynamic, set *store.Settings, l Live) {
 			if t.Port <= 0 {
 				continue
 			}
+			if len(t.SNI) == 0 {
+				continue
+			}
 			name := fmt.Sprintf("publix-tcp-%s-%d", p.Slug, j)
-			router := &TCPRouter{
-				Service: TCPServiceFor(p.Slug, l.Deployment, t) + "@docker",
+			d.tcp().Routers[name] = &TCPRouter{
+				Rule:        sniRule(t.SNI),
+				EntryPoints: set.EntryPoints,
+				Service:     TCPServiceFor(p.Slug, l.Deployment, t) + "@docker",
+				TLS:         &TCPRouterTLS{Passthrough: t.Passthrough},
 			}
-
-			if t.Raw() {
-				// Nothing on this path is TLS, so there is no SNI to match
-				// and no certificate to pass through. The dedicated entry
-				// point is the whole matcher: HostSNI(`*`) is how Traefik
-				// spells "anything, including a connection that never
-				// offered a server name".
-				router.Rule = "HostSNI(`*`)"
-				router.EntryPoints = []string{t.EntryPoint}
-			} else {
-				router.Rule = sniRule(t.SNI)
-				router.EntryPoints = set.EntryPoints
-				router.TLS = &TCPRouterTLS{Passthrough: t.Passthrough}
-			}
-			d.tcp().Routers[name] = router
 		}
 	}
 }

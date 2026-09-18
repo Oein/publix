@@ -125,6 +125,15 @@ func (e *Engine) startContainers(ctx context.Context, dc *Context) ([]string, er
 		if sp.Port > 0 {
 			cfg.ExposedPorts = map[string]struct{}{strconv.Itoa(sp.Port) + "/tcp": {}}
 		}
+		// A port cannot be published unless the image exposes it, and an
+		// image that only documents its HTTP port would otherwise make a
+		// published SSH port silently do nothing.
+		for _, port := range sp.Ports {
+			if cfg.ExposedPorts == nil {
+				cfg.ExposedPorts = map[string]struct{}{}
+			}
+			cfg.ExposedPorts[fmt.Sprintf("%d/%s", port.Target(), port.Proto())] = struct{}{}
+		}
 
 		// A container of this name can survive a crash mid-deploy; remove
 		// it rather than fail on a name conflict the user cannot see.
@@ -195,6 +204,18 @@ func (e *Engine) hostConfig(dc *Context, binds []Bind) (*dockerapi.HostConfig, e
 	}
 	if sp.Resources.PidsLimit > 0 {
 		hc.PidsLimit = &sp.Resources.PidsLimit
+	}
+	// Published ports bypass Traefik entirely, which is the point: a
+	// protocol Traefik cannot route has nothing for it to decide on.
+	for _, port := range sp.Ports {
+		key := fmt.Sprintf("%d/%s", port.Target(), port.Proto())
+		if hc.PortBindings == nil {
+			hc.PortBindings = map[string][]dockerapi.PortBinding{}
+		}
+		hc.PortBindings[key] = append(hc.PortBindings[key], dockerapi.PortBinding{
+			HostIP:   port.Bind,
+			HostPort: strconv.Itoa(port.Host),
+		})
 	}
 	return hc, nil
 }
