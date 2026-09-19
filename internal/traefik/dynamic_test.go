@@ -32,6 +32,45 @@ func spec(t *testing.T, yaml string) *deployspec.Spec {
 	return sp
 }
 
+// A compose route may name the stack's own primary service. Its container
+// carries the project's plain service name, so a router naming it after the
+// service would point at a service Traefik does not have.
+func TestRouteNamingThePrimaryServiceTargetsTheStackService(t *testing.T) {
+	set := settings()
+	d := Build(set, []Live{{
+		Project: project("giten", "git.example.com"),
+		Spec: spec(t, `
+type: compose
+compose: compose.yaml
+service: frontend
+port: 3000
+routes:
+  - domain: git.example.com
+    service: backend
+    priority: 110
+    path: /api
+  - domain: git.example.com
+    service: frontend
+    priority: 100
+`),
+		Deployment: ComposeDeploymentKey,
+	}})
+
+	want := map[string]string{
+		"publix-r-giten-0": ServiceName("giten-backend", ComposeDeploymentKey) + "@docker",
+		"publix-r-giten-1": ServiceName("giten", ComposeDeploymentKey) + "@docker",
+	}
+	for name, service := range want {
+		r, ok := d.HTTP.Routers[name]
+		if !ok {
+			t.Fatalf("router %q is missing", name)
+		}
+		if r.Service != service {
+			t.Errorf("%s points at %q, want %q", name, r.Service, service)
+		}
+	}
+}
+
 // The central claim of the design: a production hostname points at a
 // deployment-scoped service name, so moving traffic is a change to this
 // file and nothing else.

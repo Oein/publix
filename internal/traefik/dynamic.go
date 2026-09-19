@@ -418,9 +418,12 @@ func buildProject(d *Dynamic, set *store.Settings, l Live) {
 			Priority:    route.Priority,
 			TLS:         routerTLS(set, route),
 		}
-		if route.Service != "" {
+		if route.Service != "" && !primaryService(l.Spec, route.Service) {
 			// A compose stack can expose more than one service; a route may
-			// name which one it reaches.
+			// name which one it reaches. Naming the stack's own primary
+			// service is not one of those cases: its container carries the
+			// project's plain service name, so pointing at a service named
+			// after it would point at nothing.
 			r.Service = ServiceName(p.Slug+"-"+Slug(route.Service), l.Deployment) + "@docker"
 		}
 		if route.Path != "" && route.StripPath {
@@ -456,6 +459,12 @@ func buildProject(d *Dynamic, set *store.Settings, l Live) {
 			}
 		}
 	}
+}
+
+// primaryService reports whether a route names the service the project's
+// domains already reach.
+func primaryService(sp *deployspec.Spec, service string) bool {
+	return sp != nil && sp.Service != "" && sp.Service == service
 }
 
 // sniRule builds a Traefik TCP matcher from a set of SNI hostnames.
