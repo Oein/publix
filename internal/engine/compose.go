@@ -60,11 +60,10 @@ func (e *Engine) startCompose(ctx context.Context, dc *Context) ([]string, error
 		return nil, err
 	}
 
-	// Compose puts every service on its own project network. Traefik lives
-	// on the shared publix network, so the routed containers have to be
-	// attached to it as well. Doing this after the fact rather than in the
-	// override avoids fighting Compose's list-merge rules for `networks`,
-	// which would otherwise silently drop the stack's internal wiring.
+	// The override already put the routed services on the shared network, so
+	// this attaches nothing in the normal case. It stays because it is also
+	// what collects the container ids the health gate waits on, and because
+	// a stack brought up by an older publix is still fixed by it.
 	routed, err := e.attachComposeNetwork(ctx, dc, project)
 	if err != nil {
 		return nil, err
@@ -125,12 +124,25 @@ func (e *Engine) writeComposeOverride(dc *Context, f *compose.File) (string, err
 	envMapping := envMap(env)
 	services := map[string]any{}
 
+	shared := dc.Settings.Network
+	sharedUsed := false
+
 	for _, name := range f.ServiceNames() {
 		svc := map[string]any{}
 		labels := traefik.BaseLabels(meta, traefik.RoleCompose)
 		labels["com.docker.compose.service"] = name
 
 		if routed[name] {
+			// Join the shared network here, before the container starts,
+			// rather than only afterwards: Traefik reads a container's
+			// networks when it first sees it and does not look again when
+			// one is connected later, so a container attached after the
+			// fact is advertised on the address of whichever network it
+			// happened to start with — one Traefik cannot reach.
+			sharedUsed = true
+			svc["networks"] = sharedNetworks(f.Services[name], shared,
+				composeAliases(dc.Project.Slug, name, dc.Spec.Service))
+
 			// The Traefik service name is stable across deploys for a
 			// compose stack, so the routing file does not change when the
 			// stack is redeployed in place.
@@ -192,6 +204,11 @@ func (e *Engine) writeComposeOverride(dc *Context, f *compose.File) (string, err
 	dc.ServicePorts = servicePorts
 
 	doc := map[string]any{"services": services}
+	if sharedUsed {
+		// The network belongs to the platform, not to the stack: publix
+		// created it long before this deploy and other projects sit on it.
+		doc["networks"] = map[string]any{shared: map[string]any{"external": true}}
+	}
 	raw, err := yaml.Marshal(doc)
 	if err != nil {
 		return "", err
@@ -243,6 +260,33 @@ func routedServices(sp *deployspec.Resolved) map[string]bool {
 	return routed
 }
 
+// sharedNetworks is a routed service's `networks` block: the shared network
+// it has to answer on, plus `default` when the stack's own file names none.
+//
+// Compose merges a service's networks by key, so naming one here adds to
+// whatever the repository's file declared. The exception is a service that
+// declared nothing at all: it was on the implicit default network, and
+// naming any network would take that away and cut it off from the rest of
+// the stack. Naming `default` explicitly keeps it.
+func sharedNetworks(svc compose.Service, network string, aliases []string) map[string]any {
+	nets := map[string]any{network: map[string]any{"aliases": aliases}}
+	if svc.Networks == nil {
+		nets["default"] = nil
+	}
+	return nets
+}
+
+// composeAliases are the names a routed container answers to on the shared
+// network. The primary service also answers to the project's slug, which is
+// what a route with no service of its own reaches.
+func composeAliases(slug, service, primary string) []string {
+	aliases := []string{slug + "-" + traefik.Slug(service)}
+	if service == primary {
+		aliases = append(aliases, slug)
+	}
+	return aliases
+}
+
 // composeRouterLabels are the Traefik labels for a routed compose service.
 func composeRouterLabels(set *store.Settings, svcName string, port int) map[string]string {
 	l := map[string]string{
@@ -280,10 +324,7 @@ func (e *Engine) attachComposeNetwork(ctx context.Context, dc *Context, project 
 			}
 			dc.ProbePorts[c.ID] = port
 		}
-		aliases := []string{dc.Project.Slug + "-" + traefik.Slug(service)}
-		if service == dc.Spec.Service {
-			aliases = append(aliases, dc.Project.Slug)
-		}
+		aliases := composeAliases(dc.Project.Slug, service, dc.Spec.Service)
 		if err := e.docker.ConnectNetwork(ctx, dc.Settings.Network, c.ID, aliases); err != nil {
 			return nil, fmt.Errorf("attaching %s to the %q network: %w", c.Name(), dc.Settings.Network, err)
 		}

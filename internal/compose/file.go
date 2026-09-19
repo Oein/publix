@@ -29,6 +29,7 @@ type File struct {
 // Service is one service in a compose file.
 type Service struct {
 	Image       string   `yaml:"image,omitempty"`
+	Networks    any      `yaml:"networks,omitempty"`
 	Build       any      `yaml:"build,omitempty"`
 	Ports       []any    `yaml:"ports,omitempty"`
 	Expose      []any    `yaml:"expose,omitempty"`

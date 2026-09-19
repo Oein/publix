@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Oein/publix/internal/compose"
 	"github.com/Oein/publix/internal/deployspec"
 	"github.com/Oein/publix/internal/store"
 	"github.com/Oein/publix/internal/traefik"
@@ -244,6 +245,49 @@ tcp:
 	}
 	if !routed["frontend"] {
 		t.Error("the primary service was dropped")
+	}
+}
+
+// Traefik reads a container's networks once, when it first sees it, so the
+// shared network has to be on the service before it starts rather than
+// connected afterwards.
+func TestSharedNetworkIsDeclaredOnRoutedServices(t *testing.T) {
+	svc := compose.Service{Networks: map[string]any{"internal": nil}}
+	nets := sharedNetworks(svc, "publix", []string{"giten-backend"})
+
+	shared, ok := nets["publix"].(map[string]any)
+	if !ok {
+		t.Fatalf("the shared network is missing from %v", nets)
+	}
+	if aliases, _ := shared["aliases"].([]string); len(aliases) != 1 || aliases[0] != "giten-backend" {
+		t.Errorf("aliases = %v, want [giten-backend]", shared["aliases"])
+	}
+	if _, named := nets["default"]; named {
+		t.Error("a service that names its own networks should not be given the default one")
+	}
+}
+
+// A service that named no network of its own was on the implicit default
+// one. Naming any network takes that away, so the default has to be named
+// back, or the service loses the rest of its stack.
+func TestSharedNetworkKeepsTheImplicitDefault(t *testing.T) {
+	nets := sharedNetworks(compose.Service{}, "publix", []string{"giten"})
+	if _, ok := nets["publix"]; !ok {
+		t.Errorf("the shared network is missing from %v", nets)
+	}
+	if _, ok := nets["default"]; !ok {
+		t.Errorf("the default network was dropped: %v", nets)
+	}
+}
+
+// The primary service answers to the project's slug as well, because that
+// is the name a route with no service of its own reaches.
+func TestComposeAliases(t *testing.T) {
+	if got := composeAliases("giten", "backend", "frontend"); len(got) != 1 || got[0] != "giten-backend" {
+		t.Errorf("composeAliases(secondary) = %v", got)
+	}
+	if got := composeAliases("giten", "frontend", "frontend"); len(got) != 2 || got[1] != "giten" {
+		t.Errorf("composeAliases(primary) = %v", got)
 	}
 }
 

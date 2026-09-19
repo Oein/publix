@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // ListNetworks returns all docker networks.
@@ -56,16 +57,27 @@ func (c *Client) EnsureNetwork(ctx context.Context, name string, labels map[stri
 }
 
 // ConnectNetwork attaches a container to a network after creation.
+//
+// A container that is already on the network is not an error: compose may
+// have put it there when it started, and attaching is meant to be something
+// that can be repeated.
 func (c *Client) ConnectNetwork(ctx context.Context, network, container string, aliases []string) error {
 	body := map[string]any{
 		"Container":      container,
 		"EndpointConfig": map[string]any{"Aliases": aliases},
 	}
 	err := c.postJSON(ctx, "/networks/"+url.PathEscape(network)+"/connect", nil, body, nil)
-	if Conflict(err) {
-		return nil // already attached
+	if Conflict(err) || alreadyAttached(err) {
+		return nil
 	}
 	return err
+}
+
+// alreadyAttached reads the daemon's answer to connecting a container that
+// is already connected. It is a 403 rather than a 409: the endpoint name is
+// taken, and the container holding it is this one.
+func alreadyAttached(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "already exists in network")
 }
 
 // ListVolumes returns volumes matching the given label selectors.
