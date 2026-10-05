@@ -169,8 +169,13 @@ func containerAliases(dc *Context, replica int) []string {
 // configuration.
 func (e *Engine) hostConfig(dc *Context, binds []Bind) (*dockerapi.HostConfig, error) {
 	sp := dc.Spec
+	reap := true
 	hc := &dockerapi.HostConfig{
 		NetworkMode: dc.Settings.Network,
+		// Docker's init runs as PID 1 and reaps whatever the app's own
+		// children leave orphaned. Most apps are not written to be PID 1,
+		// and without it each orphan stays a zombie for the container's life.
+		Init: &reap,
 		// unless-stopped survives a host reboot but respects an operator
 		// stopping a container by hand, which `always` does not.
 		RestartPolicy: &dockerapi.RestartPolicy{Name: "unless-stopped"},

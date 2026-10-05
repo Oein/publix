@@ -77,8 +77,11 @@ func (e *Engine) runCronJob(ctx context.Context, projectID, deploymentID, jobNam
 		Commit:     dep.Commit,
 		Created:    time.Now().UTC().Format(time.RFC3339),
 	}
+	reap := true
 	hc := &dockerapi.HostConfig{
 		NetworkMode: set.Network,
+		// Reaps orphaned children, as for a deployment's containers.
+		Init: &reap,
 		// A finished job leaves nothing behind; its output is captured
 		// before the container is removed.
 		RestartPolicy: &dockerapi.RestartPolicy{Name: "no"},

@@ -45,7 +45,7 @@ FROM alpine:3.21
 # git clones repositories; the docker CLI and its compose plugin are what
 # publix drives compose projects with. Everything else it does goes over the
 # Docker API directly.
-RUN apk add --no-cache ca-certificates git openssh-client docker-cli docker-cli-compose tzdata
+RUN apk add --no-cache ca-certificates git openssh-client docker-cli docker-cli-compose tini tzdata
 
 COPY --from=build /out/publix /usr/local/bin/publix
 
@@ -62,5 +62,9 @@ EXPOSE 4321
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- http://127.0.0.1:4321/api/health >/dev/null 2>&1 || exit 1
 
-ENTRYPOINT ["publix"]
+# tini runs as PID 1 so publix does not have to. git hands work to helpers
+# (git-remote-https, ssh) that outlive it when a clone times out or is
+# cancelled; orphaned, they are re-parented to PID 1, and publix never waits
+# on processes it did not start — so without an init each one stays a zombie.
+ENTRYPOINT ["/sbin/tini", "--", "publix"]
 CMD ["serve"]
