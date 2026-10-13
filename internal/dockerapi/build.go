@@ -86,6 +86,12 @@ func (c *Client) BuildImage(ctx context.Context, opt BuildOptions, w io.Writer) 
 	return relayBuildOutput(resp.Body, w)
 }
 
+// CacheRestoreFailed reports the legacy builder failing to restore a layer
+// from a cache-from image (see Engine.buildImage for why that happens).
+func CacheRestoreFailed(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "failed to restore cached image")
+}
+
 // buildMessage is one line of the daemon's JSON build stream.
 type buildMessage struct {
 	Stream      string `json:"stream"`

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 	"time"
@@ -121,7 +122,7 @@ func (e *Engine) buildDockerfile(ctx context.Context, dc *Context, tag string) e
 	out := dc.Log.Writer(buildlog.StreamStdout)
 	defer out.Flush()
 
-	err := e.docker.BuildImage(ctx, dockerapi.BuildOptions{
+	err := e.buildImage(ctx, dc, dockerapi.BuildOptions{
 		Context:    buildCtx,
 		Dockerfile: sp.Dockerfile,
 		Tags:       []string{tag},
@@ -171,7 +172,7 @@ func (e *Engine) buildGenerated(ctx context.Context, dc *Context, tag string) er
 	out := dc.Log.Writer(buildlog.StreamStdout)
 	defer out.Flush()
 
-	if err := e.docker.BuildImage(ctx, dockerapi.BuildOptions{
+	if err := e.buildImage(ctx, dc, dockerapi.BuildOptions{
 		Context:    filepath.Join(dc.Root, sp.Context),
 		Dockerfile: "Dockerfile.publix",
 		Tags:       []string{tag},
@@ -184,6 +185,27 @@ func (e *Engine) buildGenerated(ctx context.Context, dc *Context, tag string) er
 		return fmt.Errorf("docker build failed: %w", err)
 	}
 	return nil
+}
+
+// buildImage runs one build, and retries it once without CacheFrom when the
+// daemon fails to restore a cache-from layer.
+//
+// The legacy builder on the containerd image store (Docker 29's default)
+// trips over its own bookkeeping here: restoring a layer from a cache-from
+// image records it as moby-dangling@<digest>, and once an image that record
+// came from has been removed (retention does that to every old deploy) the
+// next restore of the same layer fails with "already exists, but failed to
+// resolve". Every later build of the project then fails at the first cached
+// step until someone prunes the daemon by hand. Without cache-from the daemon
+// still uses its local build cache, so the retry is barely slower.
+func (e *Engine) buildImage(ctx context.Context, dc *Context, opt dockerapi.BuildOptions, out io.Writer) error {
+	err := e.docker.BuildImage(ctx, opt, out)
+	if err == nil || len(opt.CacheFrom) == 0 || !dockerapi.CacheRestoreFailed(err) {
+		return err
+	}
+	dc.Log.Printf("The daemon could not restore a cached layer (%v); building again without cache-from", err)
+	opt.CacheFrom = nil
+	return e.docker.BuildImage(ctx, opt, out)
 }
 
 // renderFor produces the framework result a deployment should build from:
