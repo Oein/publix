@@ -631,18 +631,34 @@ func (s *Server) ReportStatus(ctx context.Context, p *store.Project, d *store.De
 
 // GitAuth supplies an authenticated clone URL to the deploy engine.
 func (s *Server) GitAuth(repo *store.Repo) (string, error) {
-	if repo == nil || !repo.Private {
-		// A public repository clones fine anonymously, and keeping a token
-		// out of the git process is one less place for it to leak.
+	if repo == nil {
 		return "", nil
 	}
+	// The private flag is only what GitHub said at import. A repository
+	// made private afterwards is still recorded as public, and cloning it
+	// anonymously fails with "Repository not found". So whenever GitHub is
+	// connected, authenticate; the recorded flag only decides whether
+	// failing to do so is fatal.
 	gh, err := s.github()
 	if err != nil {
-		return "", fmt.Errorf("%s is private, but GitHub is not connected: %w", repo.FullName(), err)
+		if repo.Private {
+			return "", fmt.Errorf("%s is private, but GitHub is not connected: %w", repo.FullName(), err)
+		}
+		return "", nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	return gh.AuthenticateCloneURL(ctx, repo.CloneURL)
+	authed, err := gh.AuthenticateCloneURL(ctx, repo.CloneURL)
+	if err != nil {
+		if repo.Private {
+			return "", err
+		}
+		// A public repository outside every installation clones fine
+		// anonymously.
+		s.log.Debug("cloning anonymously", "repo", repo.FullName(), "error", err)
+		return "", nil
+	}
+	return authed, nil
 }
 
 // suggestSpec renders the deployment.yaml publix would use, which the
