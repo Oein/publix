@@ -80,6 +80,15 @@ func alreadyAttached(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "already exists in network")
 }
 
+// SandboxGone reads the daemon's answer to connecting a container that is
+// between restarts: it counts as running, but its network namespace has
+// already been torn down. A container crash-looping on startup answers
+// this way, and the useful report is why it keeps exiting, not that it
+// could not be connected.
+func SandboxGone(err error) bool {
+	return NotFound(err) && strings.Contains(err.Error(), "network sandbox")
+}
+
 // ListVolumes returns volumes matching the given label selectors.
 func (c *Client) ListVolumes(ctx context.Context, labels ...string) ([]Volume, error) {
 	q := url.Values{}

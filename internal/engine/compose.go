@@ -16,6 +16,7 @@ import (
 	"github.com/Oein/publix/internal/buildlog"
 	"github.com/Oein/publix/internal/compose"
 	"github.com/Oein/publix/internal/deployspec"
+	"github.com/Oein/publix/internal/dockerapi"
 	"github.com/Oein/publix/internal/store"
 	"github.com/Oein/publix/internal/traefik"
 	"gopkg.in/yaml.v3"
@@ -325,7 +326,10 @@ func (e *Engine) attachComposeNetwork(ctx context.Context, dc *Context, project 
 			dc.ProbePorts[c.ID] = port
 		}
 		aliases := composeAliases(dc.Project.Slug, service, dc.Spec.Service)
-		if err := e.docker.ConnectNetwork(ctx, dc.Settings.Network, c.ID, aliases); err != nil {
+		// A container that is down between restarts cannot be connected,
+		// but the override put it on the network when it was created. It
+		// is still collected, so the health gate reports why it is down.
+		if err := e.docker.ConnectNetwork(ctx, dc.Settings.Network, c.ID, aliases); err != nil && !dockerapi.SandboxGone(err) {
 			return nil, fmt.Errorf("attaching %s to the %q network: %w", c.Name(), dc.Settings.Network, err)
 		}
 		out = append(out, c.ID)
