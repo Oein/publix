@@ -412,6 +412,18 @@ func firstNonEmpty(vals ...string) string {
 }
 
 // ensureDir creates a directory, reporting a useful error if it cannot.
+// existingDir fails unless path is an existing directory.
+func existingDir(path string) error {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("read-only mount %s: %w", path, err)
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("read-only mount %s is not a directory", path)
+	}
+	return nil
+}
+
 func ensureDir(path string, perm os.FileMode) error {
 	if err := os.MkdirAll(path, perm); err != nil {
 		return fmt.Errorf("creating %s: %w", path, err)

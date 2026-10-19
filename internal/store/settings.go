@@ -688,6 +688,31 @@ func (v Volume) EnsureDir(projectID string) (string, error) {
 	return dir, nil
 }
 
+// ExistingDir returns the directory a project mounts from this volume
+// without creating it or touching its permissions. Read-only mounts use it:
+// there is nothing to write, and the directory is often one publix may not
+// chmod at all — an NFS export with root squashed, say, where even a chmod
+// to the mode it already has is refused.
+func (v Volume) ExistingDir(projectID string) (string, error) {
+	dir := v.Dir(projectID)
+	if err := requireDir(dir, v.Name); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// requireDir fails unless dir exists and is a directory.
+func requireDir(dir, volume string) error {
+	fi, err := os.Stat(dir)
+	if err != nil {
+		return fmt.Errorf("volume %q is mounted read-only, so publix will not create %s: %w", volume, dir, err)
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("volume %q: %s is not a directory", volume, dir)
+	}
+	return nil
+}
+
 // Home is the directory publix keeps its state in.
 func Home() string {
 	if h := os.Getenv("PUBLIX_HOME"); h != "" {

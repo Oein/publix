@@ -57,13 +57,31 @@ func (e *Engine) resolveVolumes(dc *Context) ([]Bind, error) {
 			continue
 		}
 
-		hostDir, err := sv.EnsureDir(dc.Project.ID)
+		// A volume the operator marked read-only stays read-only no matter
+		// what the repository asks for.
+		readOnly := v.ReadOnly || sv.ReadOnly
+
+		// Read-only mounts are used as they are: the container cannot write
+		// to them, so there is no reason to create or chmod anything — and
+		// doing so fails outright on a root-squashed NFS export.
+		var hostDir string
+		var err error
+		if readOnly {
+			hostDir, err = sv.ExistingDir(dc.Project.ID)
+		} else {
+			hostDir, err = sv.EnsureDir(dc.Project.ID)
+		}
 		if err != nil {
 			return nil, err
 		}
 		if v.SubPath != "" {
 			hostDir = filepath.Join(hostDir, filepath.Clean("/"+v.SubPath))
-			if err := ensureDir(hostDir, 0o777); err != nil {
+			if readOnly {
+				err = existingDir(hostDir)
+			} else {
+				err = ensureDir(hostDir, 0o777)
+			}
+			if err != nil {
 				return nil, err
 			}
 		}
@@ -78,10 +96,8 @@ func (e *Engine) resolveVolumes(dc *Context) ([]Bind, error) {
 			Shared:    sv.Shared(),
 			HostPath:  hostDir,
 			MountPath: mount,
-			// A volume the operator marked read-only stays read-only no
-			// matter what the repository asks for.
-			ReadOnly: v.ReadOnly || sv.ReadOnly,
-			Services: v.Services,
+			ReadOnly:  readOnly,
+			Services:  v.Services,
 		})
 	}
 
