@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -241,4 +242,154 @@ print(sorted(os.listdir("/db")), sqlite3.connect("/db/main.db").execute("select 
 	if got != "['main.db'] kept" {
 		t.Errorf("after restore: %s, want only main.db holding the row", got)
 	}
+}
+
+// The explorer has to read every engine the same way a person would: list
+// what is there, page through one object, and — for SQL — answer a query
+// while refusing to write.
+func TestExploreEveryEngine(t *testing.T) {
+	type seed struct {
+		script string // run in the database container
+		object string // what the overview must list
+		want   string // a value the page must contain
+		query  string // a read-only query, "" for engines without one
+	}
+	cases := map[store.DBEngine]func(d *store.Database) seed{
+		store.EnginePostgres: func(d *store.Database) seed {
+			return seed{
+				`psql -U app -d main -c "create table people (id int, name text, tags jsonb); insert into people values (1, 'ada', '{\"a\":1}'), (2, 'grace', null)"`,
+				"people", `"grace"`, "SELECT name FROM people WHERE id = 1",
+			}
+		},
+		store.EngineMySQL: func(d *store.Database) seed {
+			return seed{
+				"mysql -uroot -p" + d.Password + ` main -e "create table people (id int, name text); insert into people values (1, 'ada'), (2, 'grace\tline')"`,
+				"people", `"grace\tline"`, "SELECT name FROM people WHERE id = 1",
+			}
+		},
+		store.EngineMongo: func(d *store.Database) seed {
+			return seed{
+				"mongosh --quiet -u app -p " + d.Password + ` --authenticationDatabase admin main --eval 'db.people.insertMany([{name: "ada"}, {name: "grace", tags: ["x"]}])'`,
+				"people", `"grace"`, "",
+			}
+		},
+		store.EngineRedis: func(d *store.Database) seed {
+			return seed{
+				"redis-cli --no-auth-warning -a " + d.Password + " hset people:1 name grace role admin",
+				"people:1", `"grace"`, "",
+			}
+		},
+	}
+
+	for engine, mk := range cases {
+		t.Run(string(engine), func(t *testing.T) {
+			h, p, d := dbHarness(t, engine)
+			s := mk(d)
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			defer cancel()
+			execIn(t, h, p, d, s.script)
+			checkExplorer(t, h.engine, ctx, p, d, s.object, s.want, s.query)
+		})
+	}
+
+	t.Run("sqlite", func(t *testing.T) {
+		h, p, d := dbHarness(t, store.EngineSQLite)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		if out, err := h.engine.runHelper(ctx, p, d, sqliteSnapshotImage, []string{"python3", "-c", `import sqlite3
+c = sqlite3.connect("/db/main.db")
+c.execute("create table people (id int, name text, photo blob)")
+c.execute("insert into people values (1, 'ada', x'00ff'), (2, 'grace', null)")
+c.commit()`}, nil, []string{d.VolumeName(p.ID) + ":/db"}); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		checkExplorer(t, h.engine, ctx, p, d, "people", `"grace"`, "SELECT name FROM people WHERE id = 1")
+	})
+}
+
+func checkExplorer(t *testing.T, e *Engine, ctx context.Context, p *store.Project, d *store.Database, object, want, query string) {
+	t.Helper()
+	ov, err := e.ExploreDatabase(ctx, p, d, "")
+	if err != nil {
+		t.Fatalf("overview: %v", err)
+	}
+	found := false
+	for _, o := range ov.Objects {
+		found = found || o.Name == object
+	}
+	if !found {
+		t.Fatalf("overview %+v does not list %s", ov.Objects, object)
+	}
+	if ov.Queryable != (query != "") {
+		t.Errorf("queryable = %v", ov.Queryable)
+	}
+
+	page, err := e.BrowseDatabase(ctx, p, d, object, "", 0, 1)
+	if err != nil {
+		t.Fatalf("browse: %v", err)
+	}
+	if len(page.Rows) != 1 || len(page.Columns) == 0 {
+		t.Fatalf("browse with limit 1 = %d rows, columns %v", len(page.Rows), page.Columns)
+	}
+	if d.Engine != store.EngineRedis && (!page.More || page.Total == nil || *page.Total != 2) {
+		t.Errorf("page should say more rows follow out of 2: more=%v total=%v", page.More, page.Total)
+	}
+	all, err := e.BrowseDatabase(ctx, p, d, object, "", 0, 10)
+	if err != nil {
+		t.Fatalf("browse: %v", err)
+	}
+	if !strings.Contains(fmt.Sprint(rawRows(all)), want) {
+		t.Errorf("browse rows %v do not contain %s", rawRows(all), want)
+	}
+	if _, err := e.BrowseDatabase(ctx, p, d, "no_such_thing", "", 0, 10); err == nil && d.Engine != store.EngineMongo {
+		t.Error("browsing an object that does not exist succeeded")
+	}
+
+	if query == "" {
+		if _, err := e.QueryDatabase(ctx, p, d, "SELECT 1", 10); err == nil {
+			t.Error("a query against an engine without SQL succeeded")
+		}
+		return
+	}
+	res, err := e.QueryDatabase(ctx, p, d, query+";", 10)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if len(res.Rows) != 1 || string(res.Rows[0][0]) != `"ada"` {
+		t.Errorf("query rows = %v", rawRows(res))
+	}
+	if _, err := e.QueryDatabase(ctx, p, d, "DELETE FROM people", 10); err == nil {
+		t.Error("a DELETE got through the read-only query")
+	}
+	if _, err := e.QueryDatabase(ctx, p, d, "SELECT 1; DROP TABLE people", 10); err == nil {
+		t.Error("a second statement got through")
+	}
+	// The wrapping above already makes a DELETE a syntax error. Underneath
+	// it, the session itself has to refuse a write.
+	var direct error
+	switch d.Engine {
+	case store.EnginePostgres:
+		_, direct = e.psql(ctx, p, d, "DELETE FROM people")
+	case store.EngineMySQL:
+		_, direct = e.mysql(ctx, p, d, false, "DELETE FROM people")
+	}
+	if d.Engine != store.EngineSQLite && (direct == nil || !strings.Contains(strings.ToLower(direct.Error()), "read")) {
+		t.Errorf("a bare DELETE in the explorer's session was not refused as read-only: %v", direct)
+	}
+	if after, err := e.BrowseDatabase(ctx, p, d, object, "", 0, 10); err != nil || len(after.Rows) != 2 {
+		t.Errorf("the table changed after refused writes: %v %v", rawRows(after), err)
+	}
+}
+
+func rawRows(r *ExploreResult) []string {
+	if r == nil {
+		return nil
+	}
+	var out []string
+	for _, row := range r.Rows {
+		for _, c := range row {
+			out = append(out, string(c))
+		}
+	}
+	return out
 }

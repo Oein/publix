@@ -73,6 +73,8 @@ databases:
   dashboard `DATABASE_URL` silently overrides the managed one — remove it.
 - Backups: register a target (host dir or rclone: Google Drive, S3…) once,
   then per database `backup: {schedule, target, keep}`.
+- Inspect data read-only with `explore_database` / `query_database` (or
+  the dashboard's Databases page) — e.g. to verify a migration landed.
 
 Details, migration of an existing DB into publix, backup/restore:
 [references/databases.md](references/databases.md).

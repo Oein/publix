@@ -3,7 +3,7 @@
 publix speaks the [Model Context Protocol](https://modelcontextprotocol.io),
 so an AI agent can operate it directly: list projects, read a failing build
 log, set an environment variable, deploy, roll back, register a domain —
-everything the dashboard can do, as 50 tools.
+everything the dashboard can do, as 53 tools.
 
 There is no second implementation behind them. Each tool is dispatched, in
 process, through the same routing tree that serves the dashboard, so a tool
@@ -84,9 +84,10 @@ the two routes offer exactly the same tools.
 
 **Project configuration** — `set_env`, `set_domains`, `run_cron_job`
 
-**Databases** — `list_databases`, `create_database`, `update_database`,
-`delete_database`, `restart_database`, `get_database_logs`,
-`backup_database`, `list_backups`, `restore_database`
+**Databases** — `list_all_databases`, `list_databases`, `create_database`,
+`update_database`, `delete_database`, `restart_database`,
+`get_database_logs`, `backup_database`, `list_backups`, `restore_database`,
+`explore_database`, `query_database` (read-only)
 
 **GitHub** — `github_status`, `connect_github`, `disconnect_github`,
 `list_repos`, `inspect_repo`, `import_repo`

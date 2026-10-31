@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -499,4 +500,89 @@ func (s *Server) handleDeleteBackupTarget(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, s.backupTargetViews())
+}
+
+// allDatabaseView is a database in the server-wide list, which also says
+// whose it is.
+type allDatabaseView struct {
+	databaseView
+	Project projectRef `json:"project"`
+}
+
+type projectRef struct {
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+}
+
+// handleListAllDatabases lists every project's databases: the Databases
+// page, and an agent asking what the server runs.
+func (s *Server) handleListAllDatabases(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	out := []allDatabaseView{}
+	for _, p := range s.store.Projects() {
+		for _, d := range p.Databases {
+			out = append(out, allDatabaseView{
+				databaseView: s.databaseView(ctx, p, d),
+				Project:      projectRef{ID: p.ID, Slug: p.Slug, Name: p.Name},
+			})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Project.Slug != out[j].Project.Slug {
+			return out[i].Project.Slug < out[j].Project.Slug
+		}
+		return out[i].Name < out[j].Name
+	})
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleExploreDatabase lists what a database holds, or — given ?object=
+// — returns a page of one table, collection or key.
+func (s *Server) handleExploreDatabase(w http.ResponseWriter, r *http.Request) {
+	p, d, ok := s.database(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	if object := q.Get("object"); object != "" {
+		offset, _ := strconv.Atoi(q.Get("offset"))
+		limit, _ := strconv.Atoi(q.Get("limit"))
+		res, err := s.engine.BrowseDatabase(r.Context(), p, d, object, q.Get("filter"), offset, limit)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
+		return
+	}
+	ov, err := s.engine.ExploreDatabase(r.Context(), p, d, q.Get("match"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, ov)
+}
+
+// handleQueryDatabase runs one read-only SQL statement.
+func (s *Server) handleQueryDatabase(w http.ResponseWriter, r *http.Request) {
+	p, d, ok := s.database(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		SQL   string `json:"sql"`
+		Limit int    `json:"limit"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	res, err := s.engine.QueryDatabase(r.Context(), p, d, body.SQL, body.Limit)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }

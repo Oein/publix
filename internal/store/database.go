@@ -164,6 +164,12 @@ func (e DBEngine) Port() int {
 // HasServer reports whether the engine runs as a container of its own.
 func (e DBEngine) HasServer() bool { return e != EngineSQLite }
 
+// IsSQL reports whether e answers SQL, which is what the explorer's query
+// box speaks.
+func (e DBEngine) IsSQL() bool {
+	return e == EnginePostgres || e == EngineMySQL || e == EngineSQLite
+}
+
 // Valid reports whether e is a supported engine.
 func (e DBEngine) Valid() bool {
 	for _, x := range DBEngines {

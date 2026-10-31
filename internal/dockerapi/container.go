@@ -112,6 +112,12 @@ func (c *Client) RenameContainer(ctx context.Context, id, name string) error {
 
 // Exec runs a command inside a running container and collects its output.
 func (c *Client) Exec(ctx context.Context, id string, cmd []string) (*ExecResult, error) {
+	return c.ExecEnv(ctx, id, cmd, nil)
+}
+
+// ExecEnv is Exec with extra environment variables — the way to hand a
+// command a password without putting it on a command line that `ps` shows.
+func (c *Client) ExecEnv(ctx context.Context, id string, cmd, env []string) (*ExecResult, error) {
 	var created struct {
 		ID string `json:"Id"`
 	}
@@ -119,6 +125,9 @@ func (c *Client) Exec(ctx context.Context, id string, cmd []string) (*ExecResult
 		"AttachStdout": true,
 		"AttachStderr": true,
 		"Cmd":          cmd,
+	}
+	if len(env) > 0 {
+		body["Env"] = env
 	}
 	if err := c.postJSON(ctx, "/containers/"+id+"/exec", nil, body, &created); err != nil {
 		return nil, err

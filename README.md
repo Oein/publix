@@ -290,7 +290,9 @@ databases:
     name: cache
 ```
 
-The same can be done from the project's **Databases** tab. Backups go on a
+The same can be done from the project's **Databases** tab, and the
+**Databases** page lists every project's databases and lets you browse
+their data read-only — tables, documents, keys, and SQL queries. Backups go on a
 schedule to a host directory or, through rclone, to Google Drive, S3 and the
 like, and restore with one click. See [docs/databases.md](docs/databases.md).
 

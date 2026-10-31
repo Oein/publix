@@ -120,6 +120,7 @@ func (s *Server) buildRoutes() *http.ServeMux {
 	mux.HandleFunc("PUT /api/projects/{id}/env", auth(s.handleSetEnv))
 	mux.HandleFunc("PUT /api/projects/{id}/domains", auth(s.handleSetDomains))
 	mux.HandleFunc("POST /api/projects/{id}/cron/{job}/run", auth(s.handleRunCron))
+	mux.HandleFunc("GET /api/databases", auth(s.handleListAllDatabases))
 	mux.HandleFunc("GET /api/projects/{id}/databases", auth(s.handleListDatabases))
 	mux.HandleFunc("POST /api/projects/{id}/databases", auth(s.handleCreateDatabase))
 	mux.HandleFunc("PATCH /api/projects/{id}/databases/{db}", auth(s.handleUpdateDatabase))
@@ -129,6 +130,8 @@ func (s *Server) buildRoutes() *http.ServeMux {
 	mux.HandleFunc("GET /api/projects/{id}/databases/{db}/backups", auth(s.handleListBackups))
 	mux.HandleFunc("POST /api/projects/{id}/databases/{db}/backups", auth(s.handleBackupDatabase))
 	mux.HandleFunc("POST /api/projects/{id}/databases/{db}/restore", auth(s.handleRestoreDatabase))
+	mux.HandleFunc("GET /api/projects/{id}/databases/{db}/explore", auth(s.handleExploreDatabase))
+	mux.HandleFunc("POST /api/projects/{id}/databases/{db}/query", auth(s.handleQueryDatabase))
 
 	mux.HandleFunc("GET /api/github", auth(s.handleGitHubStatus))
 	mux.HandleFunc("PUT /api/github", auth(s.handleSetGitHub))

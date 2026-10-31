@@ -127,9 +127,29 @@ so retention only ever prunes one database's own files, and a database
 re-created under the same name can be restored from its predecessor's
 backups. Backups keep running for a paused project.
 
+## Looking inside
+
+The **Databases** page in the menu lists every project's databases with
+their state and backups, and **Browse data** opens one: its tables,
+collections or keys on the left with sizes and row counts, a page of rows
+on the right (click any value to see it whole), and for Postgres, MySQL and
+SQLite a query box.
+
+Everything there is read-only. Postgres and MySQL reads run in a read-only
+transaction with a 15 second timeout; SQLite is opened read-only with
+`query_only`; a query must be a single statement. That protects against a
+slip, not against the dashboard's own user — who can already deploy a
+container holding the password.
+
+| Engine | Lists | Shows |
+| --- | --- | --- |
+| postgres, mysql, sqlite | tables and views, with row counts and sizes | rows, 50 a page; any `SELECT` |
+| mongo | collections | documents, filtered by a JSON query such as `{"status": "active"}` |
+| redis | keys with type and TTL, filtered by a pattern (first 1000) | a string, or a list, hash, set, sorted set or stream page by page |
+
 ## Over MCP
 
-`list_databases`, `create_database`, `update_database`, `delete_database`,
+`list_all_databases`, `explore_database`, `query_database`, `list_databases`, `create_database`, `update_database`, `delete_database`,
 `restart_database`, `get_database_logs`, `backup_database`, `list_backups`,
 `restore_database`, and for targets `list_backup_targets`,
 `add_backup_target`, `test_backup_target`, `delete_backup_target`. The

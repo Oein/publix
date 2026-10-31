@@ -322,3 +322,19 @@ textarea {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* A free-standing text box — a search or filter outside a form Field —
+   styled the way Field styles its own. */
+.text-input {
+  padding: 6px 9px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+.text-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+.text-input::placeholder { color: var(--text-faint); }
