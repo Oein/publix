@@ -195,3 +195,50 @@ func TestDeclaredDatabaseReachesTheApp(t *testing.T) {
 		t.Errorf("the app saw DATABASE_URL = %q", body)
 	}
 }
+
+// A SQLite database an app has open in WAL mode keeps its newest writes in
+// the -wal file until a checkpoint. The backup has to carry them, and come
+// out as a database that opens on its own.
+func TestSQLiteBackupCarriesTheWAL(t *testing.T) {
+	h, p, d := dbHarness(t, store.EngineSQLite)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	vol := []string{d.VolumeName(p.ID) + ":/db"}
+	py := func(code string) string {
+		t.Helper()
+		out, err := h.engine.runHelper(ctx, p, d, sqliteSnapshotImage, []string{"python3", "-c", code}, nil, vol)
+		if err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		return strings.TrimSpace(out)
+	}
+
+	// os._exit skips the close that would checkpoint, leaving the row only
+	// in the -wal file — what a crashed or still-running app leaves behind.
+	py(`import sqlite3, os
+c = sqlite3.connect("/db/main.db")
+c.execute("pragma journal_mode=wal")
+c.execute("pragma wal_autocheckpoint=0")
+c.execute("create table t (v text)")
+c.execute("insert into t values ('kept')")
+c.commit()
+os._exit(0)`)
+	if got := py(`import os; print(os.path.getsize("/db/main.db-wal") > 0)`); got != "True" {
+		t.Fatalf("the test did not leave a -wal file behind (%s)", got)
+	}
+
+	rec, err := h.engine.Backup(ctx, p.ID, d.Name, "", "test")
+	if err != nil {
+		t.Fatalf("backup: %v", err)
+	}
+	py(`import os
+for f in os.listdir("/db"): os.remove("/db/" + f)`)
+	if _, err := h.engine.Restore(ctx, p.ID, d.Name, "", rec.File); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	got := py(`import os, sqlite3
+print(sorted(os.listdir("/db")), sqlite3.connect("/db/main.db").execute("select v from t").fetchone()[0])`)
+	if got != "['main.db'] kept" {
+		t.Errorf("after restore: %s, want only main.db holding the row", got)
+	}
+}

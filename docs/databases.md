@@ -110,10 +110,12 @@ count on its Databases tab, or with `update_database`. **Back up now** and
 | mysql | `mysqldump --single-transaction` (`.sql`) | `mysql < file` |
 | mongo | `mongodump --archive --gzip` (`.archive.gz`) | `mongorestore --drop` |
 | redis | `redis-cli --rdb` (`.rdb`) | stop, swap the snapshot, rebuild the AOF, start |
-| sqlite | `tar` of the directory (`.tar.gz`) | replace the directory; redeploy afterwards |
+| sqlite | SQLite's online backup API, then `tar` (`.tar.gz`) | replace the directory; redeploy afterwards |
 
 Dumps are taken with the database's own image, so `pg_dump` always matches
-the server's major version, and everything runs in throwaway containers.
+the server's major version; SQLite goes through its backup API (in
+`python:3.12-alpine`), which takes a consistent copy while the app keeps
+writing and folds in the `-wal` file, and everything runs in throwaway containers.
 That is why backups work the same whether publix runs on the host or in a
 container. Files are laid out as
 

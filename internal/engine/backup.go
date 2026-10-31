@@ -138,10 +138,50 @@ func dumpStep(p *store.Project, d *store.Database, file string) (image, script s
 		return d.Image(), fmt.Sprintf("redis-cli -h %s --no-auth-warning --rdb %s >/dev/null", host, file),
 			[]string{"REDISCLI_AUTH=" + d.Password}, nil
 	}
-	// SQLite is files. Archiving them includes the -wal and -shm files, so
-	// a database in WAL mode is captured consistently enough to open.
-	return helperImage, "tar czf " + file + " -C /db .", nil, []string{d.VolumeName(p.ID) + ":/db:ro"}
+	// SQLite is files, but copying a file an app is writing can catch a
+	// transaction halfway and produce a backup that does not open. SQLite's
+	// online backup API copies a consistent snapshot while the app keeps
+	// running, folding in the -wal file, so every database file goes
+	// through it and anything else in the directory is copied as is. The
+	// mount is writable because reading a WAL database touches its -shm.
+	snap := file + ".d"
+	return sqliteSnapshotImage,
+		fmt.Sprintf(`python3 -c "$PUBLIX_SQLITE_SNAPSHOT" %s; tar czf %s -C %s .; rm -rf %s`, snap, file, snap, snap),
+		[]string{"PUBLIX_SQLITE_SNAPSHOT=" + sqliteSnapshot},
+		[]string{d.VolumeName(p.ID) + ":/db"}
 }
+
+// sqliteSnapshotImage carries Python, whose sqlite3 module exposes the
+// online backup API. It is an official image, so no backup depends on a
+// package mirror being reachable at 3am.
+const sqliteSnapshotImage = "python:3.12-alpine"
+
+// sqliteSnapshot copies /db into the directory named by argv[1]: database
+// files through the backup API, everything else byte for byte. A -wal,
+// -shm or -journal file beside its database is skipped, because the backup
+// already contains what it held.
+const sqliteSnapshot = `
+import os, shutil, sqlite3, sys
+src, out = "/db", sys.argv[1]
+os.makedirs(out)
+for root, _, files in os.walk(src):
+    for f in files:
+        path = os.path.join(root, f)
+        dst = os.path.join(out, os.path.relpath(path, src))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        if f.endswith(("-wal", "-shm", "-journal")) and os.path.exists(path.rsplit("-", 1)[0]):
+            continue
+        with open(path, "rb") as fh:
+            header = fh.read(16)
+        if header == b"SQLite format 3\x00":
+            s = sqlite3.connect(path, timeout=60)
+            d = sqlite3.connect(dst)
+            s.backup(d)
+            d.close()
+            s.close()
+        else:
+            shutil.copy2(path, dst)
+`
 
 // shipScript copies a staged dump onto a target and prunes old backups.
 func shipScript(t store.BackupTarget, dir, stage, file string, keep int) string {
