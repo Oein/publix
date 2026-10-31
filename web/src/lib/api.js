@@ -92,7 +92,17 @@ export const api = {
   },
 
   databases: {
+    all: () => get('/api/databases'),
     list: (id) => get(`/api/projects/${id}/databases`),
+    explore: (id, db, params = {}) => {
+      const q = new URLSearchParams();
+      for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '' && v !== null) q.set(k, v);
+      const qs = q.toString();
+      return get(`/api/projects/${id}/databases/${encodeURIComponent(db)}/explore${qs ? `?${qs}` : ''}`);
+    },
+    query: (id, db, sql, limit) =>
+      post(`/api/projects/${id}/databases/${encodeURIComponent(db)}/query`, { sql, limit }),
+    logs: (id, db, tail = 200) => get(`/api/projects/${id}/databases/${encodeURIComponent(db)}/logs?tail=${tail}`),
     create: (id, body) => post(`/api/projects/${id}/databases`, body),
     update: (id, db, body) => patch(`/api/projects/${id}/databases/${encodeURIComponent(db)}`, body),
     remove: (id, db, deleteData) =>

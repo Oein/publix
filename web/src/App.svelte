@@ -10,6 +10,8 @@
   import Project from './routes/Project.svelte';
   import Import from './routes/Import.svelte';
   import Settings from './routes/Settings.svelte';
+  import Databases from './routes/Databases.svelte';
+  import DatabaseExplorer from './routes/DatabaseExplorer.svelte';
 
   let auth = $state(null);
   let current = $state({ path: '/', segments: [], query: new URLSearchParams() });
@@ -58,6 +60,7 @@
 
   const nav = [
     { key: 'projects', path: '/', match: (p) => p === '/' || p.startsWith('/projects') },
+    { key: 'databases', path: '/databases', match: (p) => p.startsWith('/databases') },
     { key: 'import', path: '/import', match: (p) => p.startsWith('/import') },
     { key: 'settings', path: '/settings', match: (p) => p.startsWith('/settings') },
   ];
@@ -102,6 +105,12 @@
         {#key current.segments[1]}
           <Project id={current.segments[1]} tab={current.segments[2] ?? 'overview'} {revision} />
         {/key}
+      {:else if current.segments[0] === 'databases' && current.segments[1] && current.segments[2]}
+        {#key `${current.segments[1]}/${current.segments[2]}`}
+          <DatabaseExplorer slug={current.segments[1]} name={decodeURIComponent(current.segments[2])} />
+        {/key}
+      {:else if current.segments[0] === 'databases'}
+        <Databases {revision} />
       {:else if current.segments[0] === 'import'}
         <Import {revision} />
       {:else if current.segments[0] === 'settings'}
@@ -162,9 +171,13 @@
     display: flex;
     gap: 2px;
     flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
 
   nav a {
+    white-space: nowrap;
     padding: 5px 11px;
     border-radius: var(--radius-sm);
     color: var(--text-muted);
@@ -175,6 +188,8 @@
   nav a.active { background: var(--bg-sunken); color: var(--text); }
 
   .signout {
+    white-space: nowrap;
+    flex: none;
     border: none;
     background: none;
     color: var(--text-muted);
@@ -192,7 +207,8 @@
   }
 
   @media (max-width: 640px) {
-    .topbar { gap: 12px; padding: 0 12px; }
+    .topbar { gap: 8px; padding: 0 12px; }
+    nav a { padding: 5px 8px; }
     .brand span { display: none; }
     main { padding: 16px 12px 48px; }
   }

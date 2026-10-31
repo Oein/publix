@@ -356,6 +356,15 @@ func (s *Server) mcpTools() []mcpTool {
 		// --- Databases ------------------------------------------------
 
 		{
+			name:   "list_all_databases",
+			title:  "List every database on the server",
+			desc:   "Every database publix runs, across all projects, with the project each belongs to, its engine and version, whether it is running, its environment variables (password masked) and backup schedule.",
+			method: http.MethodGet,
+			path:   "/api/databases",
+			schema: schemaOf(nil, map[string]mcp.Property{}),
+			hints:  readsOnly(),
+		},
+		{
 			name:   "list_databases",
 			title:  "List a project's databases",
 			desc:   "The databases publix runs for a project: engine, version, whether the server is running, the environment variables each one gives the project (password masked), its backup schedule and recent backup history. Read this to learn which variable names an app should use, e.g. DATABASE_URL or REDIS_URL.",
@@ -435,9 +444,41 @@ func (s *Server) mcpTools() []mcpTool {
 			hints: readsOnly(),
 		},
 		{
+			name:   "explore_database",
+			title:  "Look inside a database",
+			desc:   "Without object: what the database holds — tables and views (postgres, mysql, sqlite, with row counts and sizes), collections (mongo), or keys with their type and TTL (redis; filter with a glob in match, at most 1000 keys). With object: a page of rows from that table, documents from that collection (narrow with a JSON filter), or the contents of that redis key. Read-only; long values are cut.",
+			method: http.MethodGet,
+			path:   "/api/projects/{project}/databases/{database}/explore",
+			query:  []string{"object", "offset", "limit", "filter", "match"},
+			schema: schemaOf([]string{"project", "database"}, map[string]mcp.Property{
+				"project":  projectArg(),
+				"database": databaseArg(),
+				"object":   mcpString("A table, view, collection or redis key, exactly as the overview names it. Omit for the overview."),
+				"offset":   mcpInt("Rows to skip. Defaults to 0."),
+				"limit":    mcpInt("Rows to return, at most 500. Defaults to 50."),
+				"filter":   mcpString("Mongo only: a JSON query document, e.g. {\"status\": \"active\"}."),
+				"match":    mcpString("Redis only, for the overview: a key pattern such as session:*."),
+			}),
+			hints: readsOnly(),
+		},
+		{
+			name:   "query_database",
+			title:  "Run a read-only SQL query",
+			desc:   "Run one SQL statement against a postgres, mysql or sqlite database and get up to limit rows back. It runs in a read-only transaction (sqlite: query_only) with a 15 second timeout, so it cannot change data; write it as a SELECT (or WITH … SELECT). One statement only — no semicolons.",
+			method: http.MethodPost,
+			path:   "/api/projects/{project}/databases/{database}/query",
+			schema: schemaOf([]string{"project", "database", "sql"}, map[string]mcp.Property{
+				"project":  projectArg(),
+				"database": databaseArg(),
+				"sql":      mcpString("The query, e.g. SELECT id, email FROM users ORDER BY id DESC."),
+				"limit":    mcpInt("Rows to return, at most 500. Defaults to 50."),
+			}),
+			hints: readsOnly(),
+		},
+		{
 			name:   "backup_database",
 			title:  "Back up a database now",
-			desc:   "Take a backup now and write it to a backup target, waiting until it is done. Postgres is dumped with pg_dump (custom format), MySQL with mysqldump, Mongo with mongodump, Redis as an RDB snapshot and SQLite as an archive of its directory. Returns the backup's file name and size.",
+			desc:   "Take a backup now and write it to a backup target, waiting until it is done. Postgres is dumped with pg_dump (custom format), MySQL with mysqldump, Mongo with mongodump, Redis as an RDB snapshot and SQLite through its online backup API. Returns the backup's file name and size.",
 			method: http.MethodPost,
 			path:   "/api/projects/{project}/databases/{database}/backups",
 			schema: schemaOf([]string{"project", "database"}, map[string]mcp.Property{

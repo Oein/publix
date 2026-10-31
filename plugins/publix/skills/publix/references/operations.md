@@ -19,6 +19,8 @@
 | env (replaces all) | `PUT /api/projects/{id}/env` `{"env":[{"key","value","secret"}]}` |
 | databases | `GET/POST /api/projects/{id}/databases`, `PATCH/DELETE …/databases/{name}` |
 | backup now / list / restore | `POST …/databases/{name}/backups`, `GET …/backups`, `POST …/restore` |
+| all databases | `GET /api/databases` |
+| look inside (read-only) | `GET …/databases/{name}/explore[?object=&offset=&limit=&filter=&match=]`, `POST …/databases/{name}/query` `{"sql"}` |
 | backup targets | `GET/POST /api/backup-targets` |
 
 ## MCP tools
@@ -27,7 +29,7 @@
 - Deploying: `deploy_project`, `rollback_project`, `rollback_plan`, `cancel_deployment`, `get_deployment`
 - Diagnosis: `get_build_logs`, `get_runtime_logs`, `list_containers`, `get_system`
 - Config: `set_env`, `set_domains`, `run_cron_job`
-- Databases: `list_databases`, `create_database`, `update_database`, `delete_database`, `restart_database`, `get_database_logs`, `backup_database`, `list_backups`, `restore_database`
+- Databases: `list_all_databases`, `list_databases`, `explore_database` (tables/collections/keys and rows, read-only), `query_database` (read-only SQL), `create_database`, `update_database`, `delete_database`, `restart_database`, `get_database_logs`, `backup_database`, `list_backups`, `restore_database`
 - GitHub: `github_status`, `connect_github`, `disconnect_github`, `list_repos`, `inspect_repo`, `import_repo`
 - Server: `get_settings`, `update_settings`, `add_apps_domain`, `set_default_apps_domain`, `delete_apps_domain`
 - Routing: `add_proxy`, `update_proxy`, `delete_proxy`, `add_redirect`, `update_redirect`, `delete_redirect`

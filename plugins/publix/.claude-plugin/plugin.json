@@ -1,6 +1,6 @@
 {
   "name": "publix",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "How to deploy and operate apps on publix: deployment.yaml, managed databases and backups, volumes, routing, env/secrets, CI deploys and MCP.",
   "author": { "name": "Oein" },
   "homepage": "https://github.com/Oein/publix",
