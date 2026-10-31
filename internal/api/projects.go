@@ -338,6 +338,9 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 			kept = append(kept, fmt.Sprintf("%s (%s)", v.Name, v.Dir(p.ID)))
 		}
 	}
+	for _, d := range p.Databases {
+		kept = append(kept, fmt.Sprintf("database %s (docker volume %s)", d.Name, d.VolumeName(p.ID)))
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":       true,
 		"warnings": warnings,

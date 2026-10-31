@@ -91,6 +91,27 @@ export const api = {
     runCron: (id, job) => post(`/api/projects/${id}/cron/${encodeURIComponent(job)}/run`),
   },
 
+  databases: {
+    list: (id) => get(`/api/projects/${id}/databases`),
+    create: (id, body) => post(`/api/projects/${id}/databases`, body),
+    update: (id, db, body) => patch(`/api/projects/${id}/databases/${encodeURIComponent(db)}`, body),
+    remove: (id, db, deleteData) =>
+      del(`/api/projects/${id}/databases/${encodeURIComponent(db)}${deleteData ? '?deleteData=true' : ''}`),
+    restart: (id, db) => post(`/api/projects/${id}/databases/${encodeURIComponent(db)}/restart`),
+    backup: (id, db, target) =>
+      post(`/api/projects/${id}/databases/${encodeURIComponent(db)}/backups`, target ? { target } : {}),
+    backups: (id, db, target) =>
+      get(`/api/projects/${id}/databases/${encodeURIComponent(db)}/backups${target ? `?target=${encodeURIComponent(target)}` : ''}`),
+    restore: (id, db, body) => post(`/api/projects/${id}/databases/${encodeURIComponent(db)}/restore`, body),
+  },
+
+  backupTargets: {
+    list: () => get('/api/backup-targets'),
+    add: (body) => post('/api/backup-targets', body),
+    test: (name) => post(`/api/backup-targets/${encodeURIComponent(name)}/test`),
+    remove: (name) => del(`/api/backup-targets/${encodeURIComponent(name)}`),
+  },
+
   github: {
     status: () => get('/api/github'),
     connect: (body) => put('/api/github', body),

@@ -692,3 +692,41 @@ func TestHealthPortDefaultingIsDistinguishable(t *testing.T) {
 		t.Errorf("health.port = %d, want what was written", explicit.Health.Port)
 	}
 }
+
+func TestDatabaseShorthandAndDefaults(t *testing.T) {
+	r := resolve(t, `
+port: 80
+databases:
+  - postgres
+  - redis
+  - engine: mongo
+    name: docs
+    version: "7"
+`, map[string]string{"Dockerfile": "FROM alpine\n"})
+
+	if len(r.Databases) != 3 {
+		t.Fatalf("got %d databases", len(r.Databases))
+	}
+	got := []string{r.Databases[0].Name, r.Databases[1].Name, r.Databases[2].Name}
+	if got[0] != "main" || got[1] != "cache" || got[2] != "docs" {
+		t.Errorf("names = %v, want main, cache, docs", got)
+	}
+	if r.Databases[2].Engine != "mongo" || r.Databases[2].Version != "7" {
+		t.Errorf("mapping form = %+v", r.Databases[2])
+	}
+}
+
+func TestDatabaseValidation(t *testing.T) {
+	cases := map[string]string{
+		"databases:\n  - oracle\n":                              `"oracle" is not one of`,
+		"databases:\n  - postgres\n  - mysql\n":                 `"main" is declared twice`,
+		"databases:\n  - engine: redis\n    name: Bad_\n":       "must start with a letter",
+		"databases:\n  - engine: redis\n    envPrefix: lower\n": "envPrefix",
+	}
+	for yaml, want := range cases {
+		msg := resolveErr(t, "port: 80\n"+yaml, map[string]string{"Dockerfile": "FROM alpine\n"})
+		if !strings.Contains(msg, want) {
+			t.Errorf("%q: got %q, want it to mention %q", yaml, msg, want)
+		}
+	}
+}

@@ -114,6 +114,22 @@ func envArg() mcp.Property {
 	}
 }
 
+func databaseArg() mcp.Property {
+	return mcpString("The database's name within the project, as list_databases reports it.")
+}
+
+func backupPolicyArg() mcp.Property {
+	return mcp.Property{
+		Type:        "object",
+		Description: "Automatic backups. An empty schedule turns them off.",
+		Properties: map[string]mcp.Property{
+			"schedule": mcpString("A cron expression or @daily, @hourly, @weekly. Times are the server's."),
+			"target":   mcpString("The backup target's name. May be omitted when only one is registered."),
+			"keep":     mcpInt("How many backups to keep on the target; older ones are deleted. Defaults to 7, 0 keeps all."),
+		},
+	}
+}
+
 // mcpTools is the catalogue: every capability the publix dashboard has.
 //
 // The grouping is the order a client lists them in, so it follows the
@@ -335,6 +351,129 @@ func (s *Server) mcpTools() []mcpTool {
 				"job":     mcpString("The job's name, as it appears under cron in the project's deployment.yaml."),
 			}),
 			hints: creates(),
+		},
+
+		// --- Databases ------------------------------------------------
+
+		{
+			name:   "list_databases",
+			title:  "List a project's databases",
+			desc:   "The databases publix runs for a project: engine, version, whether the server is running, the environment variables each one gives the project (password masked), its backup schedule and recent backup history. Read this to learn which variable names an app should use, e.g. DATABASE_URL or REDIS_URL.",
+			method: http.MethodGet,
+			path:   "/api/projects/{project}/databases",
+			schema: schemaOf([]string{"project"}, map[string]mcp.Property{"project": projectArg()}),
+			hints:  readsOnly(),
+		},
+		{
+			name:   "create_database",
+			title:  "Add a database to a project",
+			desc:   "Start a database for a project and wire it in. publix pulls the image, creates a data volume, generates credentials and waits until the server accepts connections; the project's containers then receive the connection details as environment variables — <PREFIX>_URL plus _HOST, _PORT, _USER, _PASSWORD and _NAME (mongo also gets _URI; sqlite gets _URL and _PATH). The first SQL or SQLite database gets the prefix DATABASE (so DATABASE_URL), the first redis REDIS, the first mongo MONGODB; later ones are named after the database. The variables only reach containers created after this, so call deploy_project afterwards. A repository can ask for the same thing declaratively under `databases:` in deployment.yaml, which is the better choice when the app depends on it.",
+			method: http.MethodPost,
+			path:   "/api/projects/{project}/databases",
+			schema: schemaOf([]string{"project", "engine"}, map[string]mcp.Property{
+				"project":   projectArg(),
+				"engine":    mcpEnum("Which database to run.", "postgres", "mysql", "mongo", "redis", "sqlite"),
+				"name":      mcpString("A name within the project, lowercase with dashes. Defaults to main (cache for redis)."),
+				"version":   mcpString("The image tag. Defaults to postgres 17, mysql 8.4, mongo 8.2, redis 7. Fixed once created."),
+				"envPrefix": mcpString("The variable prefix, e.g. DATABASE for DATABASE_URL. Omit for the conventional default."),
+				"backup":    backupPolicyArg(),
+			}),
+			hints: creates(),
+		},
+		{
+			name:   "update_database",
+			title:  "Change a database's settings",
+			desc:   "Change a database's environment variable prefix or its automatic backup schedule. Engine, version and credentials cannot change. A new prefix reaches containers on the next deploy. Send backup with an empty schedule to turn scheduled backups off.",
+			method: http.MethodPatch,
+			path:   "/api/projects/{project}/databases/{database}",
+			schema: schemaOf([]string{"project", "database"}, map[string]mcp.Property{
+				"project":   projectArg(),
+				"database":  databaseArg(),
+				"envPrefix": mcpString("A new variable prefix."),
+				"backup":    backupPolicyArg(),
+			}),
+			hints: replaces(),
+		},
+		{
+			name:   "delete_database",
+			title:  "Delete a database",
+			desc:   "Stop and remove a project's database. Its data volume is kept unless deleteData is true; with deleteData the data is gone for good, so take a backup_database first. The project keeps working only if nothing still uses the variables, and loses them on its next deploy.",
+			method: http.MethodDelete,
+			path:   "/api/projects/{project}/databases/{database}",
+			query:  []string{"deleteData"},
+			schema: schemaOf([]string{"project", "database"}, map[string]mcp.Property{
+				"project":    projectArg(),
+				"database":   databaseArg(),
+				"deleteData": mcpBool("Also delete the data volume. Irreversible."),
+			}),
+			hints: removes(),
+		},
+		{
+			name:   "restart_database",
+			title:  "Restart a database",
+			desc:   "Restart a database server, or recreate its container if it has gone missing, and wait until it accepts connections again. Data is kept.",
+			method: http.MethodPost,
+			path:   "/api/projects/{project}/databases/{database}/restart",
+			schema: schemaOf([]string{"project", "database"}, map[string]mcp.Property{
+				"project":  projectArg(),
+				"database": databaseArg(),
+			}),
+			hints: replaces(),
+		},
+		{
+			name:   "get_database_logs",
+			title:  "Get a database's logs",
+			desc:   "Recent output from a database server — where a crash-looping database or a refused login explains itself.",
+			method: http.MethodGet,
+			path:   "/api/projects/{project}/databases/{database}/logs",
+			query:  []string{"tail"},
+			schema: schemaOf([]string{"project", "database"}, map[string]mcp.Property{
+				"project":  projectArg(),
+				"database": databaseArg(),
+				"tail":     mcpInt("How many lines from the end. Defaults to 200."),
+			}),
+			hints: readsOnly(),
+		},
+		{
+			name:   "backup_database",
+			title:  "Back up a database now",
+			desc:   "Take a backup now and write it to a backup target, waiting until it is done. Postgres is dumped with pg_dump (custom format), MySQL with mysqldump, Mongo with mongodump, Redis as an RDB snapshot and SQLite as an archive of its directory. Returns the backup's file name and size.",
+			method: http.MethodPost,
+			path:   "/api/projects/{project}/databases/{database}/backups",
+			schema: schemaOf([]string{"project", "database"}, map[string]mcp.Property{
+				"project":  projectArg(),
+				"database": databaseArg(),
+				"target":   mcpString("The backup target to write to. Defaults to the database's scheduled target, or the only one registered."),
+			}),
+			hints: creates(),
+		},
+		{
+			name:   "list_backups",
+			title:  "List a database's backups",
+			desc:   "The backup files present on a target for one database, newest first, and the recent history of backups and restores with any errors.",
+			method: http.MethodGet,
+			path:   "/api/projects/{project}/databases/{database}/backups",
+			query:  []string{"target"},
+			schema: schemaOf([]string{"project", "database"}, map[string]mcp.Property{
+				"project":  projectArg(),
+				"database": databaseArg(),
+				"target":   mcpString("The backup target to look on. Defaults as for backup_database."),
+			}),
+			hints: mcp.Annotations{ReadOnlyHint: true, DestructiveHint: boolPtr(false), IdempotentHint: true, OpenWorldHint: boolPtr(true)},
+		},
+		{
+			name:   "restore_database",
+			title:  "Restore a database from a backup",
+			desc:   "Replace a database's current contents with a backup. Everything written since that backup is lost, so consider backup_database first. Redis is briefly stopped while its files are swapped; after restoring an SQLite database, redeploy so the app reopens the file.",
+			method: http.MethodPost,
+			path:   "/api/projects/{project}/databases/{database}/restore",
+			schema: schemaOf([]string{"project", "database", "file"}, map[string]mcp.Property{
+				"project":  projectArg(),
+				"database": databaseArg(),
+				"file":     mcpString("The backup file name, exactly as list_backups reports it."),
+				"target":   mcpString("The backup target holding it. Defaults as for backup_database."),
+			}),
+			hints: removes(),
 		},
 
 		// --- GitHub ---------------------------------------------------
@@ -622,6 +761,52 @@ func (s *Server) mcpTools() []mcpTool {
 				"name": mcpString("The registered volume's name."),
 			}),
 			hints: removes(),
+		},
+
+		// --- Backup targets -------------------------------------------
+
+		{
+			name:   "list_backup_targets",
+			title:  "List backup targets",
+			desc:   "The places database backups can be written to, and which databases are scheduled to use each. rclone credentials are never returned.",
+			method: http.MethodGet,
+			path:   "/api/backup-targets",
+			hints:  readsOnly(),
+		},
+		{
+			name:   "add_backup_target",
+			title:  "Register a backup target",
+			desc:   "Register somewhere database backups can go. A local target is a host directory — a second disk, an NFS or USB mount. An rclone target is anywhere rclone reaches: Google Drive, S3, Backblaze B2, Dropbox, OneDrive, SFTP and more; it needs the remote's section of an rclone.conf (for Google Drive, run `rclone config` on any machine with a browser, then `rclone config show <remote>`). publix writes and deletes a test file before saving, so a wrong path or expired credential is reported now.",
+			method: http.MethodPost,
+			path:   "/api/backup-targets",
+			schema: schemaOf([]string{"name", "type"}, map[string]mcp.Property{
+				"name":         mcpString("The name databases refer to it by, e.g. nas or gdrive."),
+				"type":         mcpEnum("local writes to a host directory; rclone uploads with rclone.", string(store.TargetLocal), string(store.TargetRclone)),
+				"path":         mcpString("For local: the absolute host directory."),
+				"remote":       mcpString("For rclone: the destination, e.g. gdrive:publix-backups."),
+				"rcloneConfig": mcpString("For rclone: the config section defining the remote, starting with [name]."),
+				"description":  mcpString("A note about the target."),
+				"skipTest":     mcpBool("Save without the test write."),
+			}),
+			hints: mcp.Annotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(true)},
+		},
+		{
+			name:   "test_backup_target",
+			title:  "Test a backup target",
+			desc:   "Write and delete a test file on a registered target, to check its path or credentials still work.",
+			method: http.MethodPost,
+			path:   "/api/backup-targets/{name}/test",
+			schema: schemaOf([]string{"name"}, map[string]mcp.Property{"name": mcpString("The target's name.")}),
+			hints:  mcp.Annotations{DestructiveHint: boolPtr(false), IdempotentHint: true, OpenWorldHint: boolPtr(true)},
+		},
+		{
+			name:   "delete_backup_target",
+			title:  "Unregister a backup target",
+			desc:   "Stop offering a backup target. Refused while a database's schedule uses it. Backups already written there are left untouched.",
+			method: http.MethodDelete,
+			path:   "/api/backup-targets/{name}",
+			schema: schemaOf([]string{"name"}, map[string]mcp.Property{"name": mcpString("The target's name.")}),
+			hints:  removes(),
 		},
 
 		// --- Account --------------------------------------------------

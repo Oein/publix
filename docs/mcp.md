@@ -3,7 +3,7 @@
 publix speaks the [Model Context Protocol](https://modelcontextprotocol.io),
 so an AI agent can operate it directly: list projects, read a failing build
 log, set an environment variable, deploy, roll back, register a domain —
-everything the dashboard can do, as 37 tools.
+everything the dashboard can do, as 50 tools.
 
 There is no second implementation behind them. Each tool is dispatched, in
 process, through the same routing tree that serves the dashboard, so a tool
@@ -84,6 +84,10 @@ the two routes offer exactly the same tools.
 
 **Project configuration** — `set_env`, `set_domains`, `run_cron_job`
 
+**Databases** — `list_databases`, `create_database`, `update_database`,
+`delete_database`, `restart_database`, `get_database_logs`,
+`backup_database`, `list_backups`, `restore_database`
+
 **GitHub** — `github_status`, `connect_github`, `disconnect_github`,
 `list_repos`, `inspect_repo`, `import_repo`
 
@@ -94,6 +98,9 @@ the two routes offer exactly the same tools.
 `update_redirect`, `delete_redirect`
 
 **Storage** — `add_volume`, `delete_volume`
+
+**Backup targets** — `list_backup_targets`, `add_backup_target`,
+`test_backup_target`, `delete_backup_target`
 
 **Account** — `change_password`
 
@@ -109,6 +116,12 @@ queued. It succeeding means the build started, not that it worked — the
 outcome is in `get_build_logs`. Traffic only moves once the new version
 passes its health check, so a failed build leaves the previous version
 serving.
+
+**A database is one call, not four.** `create_database` — or `databases:`
+in deployment.yaml — starts the server and injects `DATABASE_URL` (or
+`REDIS_URL`, `MONGODB_URL`) into the project. An agent should not invent a
+password and set the URL with `set_env`. The variables arrive on the next
+deploy. See [databases.md](databases.md).
 
 **`set_env` and `set_domains` replace the whole list.** They are not
 additive. An agent has to read the project first and send back everything it

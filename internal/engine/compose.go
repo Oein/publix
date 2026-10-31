@@ -176,6 +176,14 @@ func (e *Engine) writeComposeOverride(dc *Context, f *compose.File) (string, err
 			}
 		} else {
 			labels["traefik.enable"] = "false"
+			// A managed database answers only on the shared network. A
+			// worker or migration job that is not routed still needs to
+			// reach it, so it joins too, without the aliases that would
+			// make it look like part of the routed surface.
+			if needsDatabaseNetwork(dc.Project) {
+				sharedUsed = true
+				svc["networks"] = sharedNetworks(f.Services[name], shared, nil)
+			}
 		}
 
 		svc["labels"] = labels
@@ -209,6 +217,18 @@ func (e *Engine) writeComposeOverride(dc *Context, f *compose.File) (string, err
 		// The network belongs to the platform, not to the stack: publix
 		// created it long before this deploy and other projects sit on it.
 		doc["networks"] = map[string]any{shared: map[string]any{"external": true}}
+	}
+	// A database's volume belongs to publix too. Without declaring it
+	// external, compose reads the name as one of the stack's own volumes,
+	// and refuses the file because the stack never defined it.
+	named := map[string]any{}
+	for _, b := range binds {
+		if b.Named {
+			named[b.HostPath] = map[string]any{"external": true}
+		}
+	}
+	if len(named) > 0 {
+		doc["volumes"] = named
 	}
 	raw, err := yaml.Marshal(doc)
 	if err != nil {
@@ -270,7 +290,11 @@ func routedServices(sp *deployspec.Resolved) map[string]bool {
 // naming any network would take that away and cut it off from the rest of
 // the stack. Naming `default` explicitly keeps it.
 func sharedNetworks(svc compose.Service, network string, aliases []string) map[string]any {
-	nets := map[string]any{network: map[string]any{"aliases": aliases}}
+	var opts any
+	if len(aliases) > 0 {
+		opts = map[string]any{"aliases": aliases}
+	}
+	nets := map[string]any{network: opts}
 	if svc.Networks == nil {
 		nets["default"] = nil
 	}
@@ -491,3 +515,14 @@ func firstPortOf(f *compose.File, service string, fallback int) int {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// needsDatabaseNetwork reports whether the project has a database reached
+// over the network — every engine but SQLite, which is a mounted file.
+func needsDatabaseNetwork(p *store.Project) bool {
+	for _, d := range p.Databases {
+		if d.Engine != store.EngineSQLite {
+			return true
+		}
+	}
+	return false
+}

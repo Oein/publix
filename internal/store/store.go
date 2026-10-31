@@ -190,6 +190,7 @@ func (s *Store) Settings() Settings {
 	c := s.data.Settings
 	c.EntryPoints = append([]string(nil), c.EntryPoints...)
 	c.Volumes = append([]Volume(nil), c.Volumes...)
+	c.BackupTargets = append([]BackupTarget(nil), c.BackupTargets...)
 	return c
 }
 

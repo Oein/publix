@@ -368,6 +368,10 @@ sudo install -m 600 /var/lib/publix/publix.json /root/publix-backup.json
 | `/var/lib/publix/logs/` | build logs, one file per deployment |
 | `/etc/traefik/dynamic/publix.yml` | generated routing — do not edit |
 
+Databases publix runs keep their data in docker volumes named
+`publix-db-*`, which this file does not cover. Back those up with a backup
+target under **Settings → Backups** — see [databases.md](databases.md).
+
 ---
 
 ## When something is wrong

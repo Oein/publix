@@ -41,6 +41,14 @@ Orientation:
   - A deploy is asynchronous. deploy_project returns as soon as the build is
     queued; read get_build_logs for the outcome, or get_project to see
     whether a live deployment has changed.
+  - A project that needs a database gets one from publix rather than from
+    anywhere else: declare it under databases: in deployment.yaml (e.g.
+    "databases: [postgres]"), or call create_database. Either way the app
+    receives DATABASE_URL (REDIS_URL for redis, MONGODB_URL/MONGODB_URI for
+    mongo) with no further configuration — do not add those variables with
+    set_env. list_databases shows the exact names. Databases are backed up
+    to registered backup targets (a host disk, or Google Drive, S3 and the
+    like through rclone): see backup_database and restore_database.
   - Importing a repository is a two-step job: inspect_repo shows what publix
     worked out about it and the deployment.yaml it would use, and
     import_repo then creates the project, registers the webhook and deploys.
@@ -53,7 +61,8 @@ Worth knowing before changing anything:
     with an empty value keeps the stored value; that is how an edit to one
     variable avoids blanking the others.
   - delete_project tears down containers and routing and cannot be undone.
-    Volume data on the host is deliberately left behind.`
+    Volume data on the host is deliberately left behind, and so are the
+    project's database volumes.`
 
 // mcpServer builds the tool catalogue, once.
 func (s *Server) mcpServer() *mcp.Server {

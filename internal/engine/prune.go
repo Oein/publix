@@ -127,6 +127,7 @@ func (e *Engine) Teardown(ctx context.Context, p *store.Project) error {
 	if err != nil {
 		problems = append(problems, err.Error())
 	}
+	problems = append(problems, e.teardownDatabases(ctx, p)...)
 	for _, c := range containers {
 		if err := e.docker.RemoveContainer(ctx, c.ID, true, false); err != nil {
 			problems = append(problems, "removing "+c.Name()+": "+err.Error())

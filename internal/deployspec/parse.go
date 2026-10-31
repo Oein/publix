@@ -273,6 +273,10 @@ var nameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
 var domainRe = regexp.MustCompile(`^([a-zA-Z0-9_]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$`)
 var volNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
 
+var dbNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
+
+var envPrefixRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,40}$`)
+
 // validate reports every problem at once. A user fixing their deployment.yaml
 // should see the whole list, not discover one more on each retry.
 func (r *Resolved) validate(src framework.Source) error {
@@ -512,6 +516,40 @@ func (r *Resolved) validate(src framework.Source) error {
 		// another project's data on the same shared volume.
 		if v.SubPath != "" && (strings.HasPrefix(v.SubPath, "/") || containsDotDot(v.SubPath)) {
 			add("volumes[%d].subPath: %q must be a relative path that stays inside the project's directory", i, v.SubPath)
+		}
+	}
+
+	dbSeen := map[string]bool{}
+	for i := range s.Databases {
+		db := &s.Databases[i]
+		db.Engine = strings.ToLower(strings.TrimSpace(db.Engine))
+		if db.Name == "" {
+			// The same defaults the dashboard uses, so `- postgres` and
+			// `- redis` side by side do not collide on a name.
+			db.Name = "main"
+			if db.Engine == "redis" {
+				db.Name = "cache"
+			}
+		}
+		switch db.Engine {
+		case "postgres", "mysql", "mongo", "redis", "sqlite":
+		case "":
+			add("databases[%d].engine: is required (postgres, mysql, mongo, redis or sqlite)", i)
+		default:
+			add("databases[%d].engine: %q is not one of postgres, mysql, mongo, redis, sqlite", i, db.Engine)
+		}
+		if !dbNameRe.MatchString(db.Name) {
+			add("databases[%d].name: %q must start with a letter and be lowercase letters, digits and dashes", i, db.Name)
+		}
+		if dbSeen[db.Name] {
+			add("databases[%d].name: %q is declared twice — give the second one a name of its own", i, db.Name)
+		}
+		dbSeen[db.Name] = true
+		if db.EnvPrefix != "" && !envPrefixRe.MatchString(db.EnvPrefix) {
+			add("databases[%d].envPrefix: %q must be uppercase letters, digits and underscores", i, db.EnvPrefix)
+		}
+		if db.Engine == "sqlite" && mountSeen["/data/"+db.Name] {
+			add("databases[%d]: an SQLite database mounts at /data/%s, which a volume already uses", i, db.Name)
 		}
 	}
 

@@ -65,6 +65,10 @@ type Settings struct {
 	// remains only so an older state file still opens.
 	LegacySharedVolumes []Volume `json:"sharedVolumes,omitempty"`
 
+	// BackupTargets are where database backups can be written: a host
+	// directory, or anywhere rclone reaches.
+	BackupTargets []BackupTarget `json:"backupTargets,omitempty"`
+
 	// WorkDir is where publix keeps repository checkouts.
 	WorkDir string `json:"workDir"`
 

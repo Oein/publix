@@ -119,6 +119,12 @@ type Spec struct {
 	// at /shared/<name>.
 	Volumes []Volume `yaml:"volumes,omitempty"`
 
+	// Databases are databases publix runs for the project. Each is created
+	// on the first deploy that declares it and kept from then on; its
+	// connection details arrive as environment variables, DATABASE_URL for
+	// the first SQL database and REDIS_URL for the first Redis.
+	Databases []Database `yaml:"databases,omitempty"`
+
 	Build     Build     `yaml:"build,omitempty"`
 	Health    Health    `yaml:"health,omitempty"`
 	Resources Resources `yaml:"resources,omitempty"`
@@ -238,6 +244,38 @@ func (p Port) Proto() string {
 		return "tcp"
 	}
 	return strings.ToLower(p.Protocol)
+}
+
+// Database asks publix to run a database for the project.
+type Database struct {
+	// Name identifies it within the project, e.g. "main".
+	Name string `yaml:"name"`
+	// Engine is postgres, mysql, mongo, redis or sqlite.
+	Engine string `yaml:"engine"`
+	// Version is the image tag. Omitted, publix picks a current major.
+	// It only applies when the database is created: changing it later
+	// would mean a data migration, which a deploy is no place to start.
+	Version string `yaml:"version,omitempty"`
+	// EnvPrefix names the variables: DATABASE gives DATABASE_URL and
+	// friends. Omitted, the first database of its kind gets the name
+	// frameworks already read.
+	EnvPrefix string `yaml:"envPrefix,omitempty"`
+}
+
+// UnmarshalYAML accepts a bare engine name, so `- postgres` is enough.
+func (d *Database) UnmarshalYAML(unmarshal func(any) error) error {
+	var engine string
+	if err := unmarshal(&engine); err == nil {
+		d.Engine = engine
+		return nil
+	}
+	type raw Database
+	var r raw
+	if err := unmarshal(&r); err != nil {
+		return err
+	}
+	*d = Database(r)
+	return nil
 }
 
 // Volume attaches a shared volume registered on the server.

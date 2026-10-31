@@ -53,6 +53,10 @@ type Project struct {
 	// Values marked secret are never returned by the API.
 	Env []EnvVar `json:"env,omitempty"`
 
+	// Databases are the databases publix runs for this project. Their
+	// connection details reach every container as environment variables.
+	Databases []*Database `json:"databases,omitempty"`
+
 	// Current is the deployment currently serving traffic.
 	Current string `json:"current,omitempty"`
 
@@ -224,6 +228,12 @@ func (p *Project) Redacted() *Project {
 			e.Value = ""
 		}
 		clone.Env[i] = e
+	}
+	clone.Databases = make([]*Database, len(p.Databases))
+	for i, d := range p.Databases {
+		c := *d
+		c.Password = ""
+		clone.Databases[i] = &c
 	}
 	if p.Repo != nil {
 		r := *p.Repo

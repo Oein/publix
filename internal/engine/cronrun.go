@@ -162,6 +162,8 @@ func (s *Scheduler) Run(ctx context.Context) {
 func (s *Scheduler) tick(ctx context.Context, now time.Time) {
 	minute := now.Truncate(time.Minute)
 
+	s.tickBackups(ctx, minute)
+
 	for _, p := range s.store.Projects() {
 		if p.Paused {
 			continue
@@ -199,6 +201,40 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time) {
 					s.OnError(projectName, jobName, err)
 				}
 			}(p.ID, p.Name, job.Name, live.ID)
+		}
+	}
+}
+
+// tickBackups starts every database backup due this minute. Backups run
+// for paused projects too: pausing stops deploys, and a paused project's
+// data still deserves to be backed up.
+func (s *Scheduler) tickBackups(ctx context.Context, minute time.Time) {
+	for _, p := range s.store.Projects() {
+		for _, d := range p.Databases {
+			if d.Backup == nil || d.Backup.Schedule == "" {
+				continue
+			}
+			sched, err := ParseSchedule(d.Backup.Schedule)
+			if err != nil || !sched.Matches(minute) {
+				continue
+			}
+			key := "backup/" + p.ID + "/" + d.ID
+			s.mu.Lock()
+			fired := s.last[key].Equal(minute)
+			if !fired {
+				s.last[key] = minute
+			}
+			s.mu.Unlock()
+			if fired {
+				continue
+			}
+			go func(projectID, projectName, dbName, target string) {
+				bctx, cancel := context.WithTimeout(ctx, 6*time.Hour)
+				defer cancel()
+				if _, err := s.engine.Backup(bctx, projectID, dbName, target, "schedule"); err != nil && s.OnError != nil {
+					s.OnError(projectName, "backup of "+dbName, err)
+				}
+			}(p.ID, p.Name, d.Name, d.Backup.Target)
 		}
 	}
 }
