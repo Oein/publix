@@ -213,7 +213,7 @@ instead — see [Domains](#domains).
 
 ### Environment
 
-Values may reference three namespaces. An unresolved reference fails the
+Values may reference four namespaces. An unresolved reference fails the
 deploy rather than starting your app with a blank setting — give it a
 `:-default` if it is genuinely optional.
 
@@ -222,6 +222,7 @@ env:
   DATABASE_URL: ${secret.DATABASE_URL}   # set in the dashboard
   HOME_REGION: ${env.REGION}             # from the publix server's own env
   BUILD: ${publix.COMMIT}                # deployment metadata
+  PG_URL: ${db.DATABASE_URL}             # a database publix runs for you
   LOG_LEVEL: ${secret.LOG_LEVEL:-info}   # optional, with a default
 ```
 
@@ -275,6 +276,23 @@ path that overlaps a volume already registered: one volume inside another
 would let a shared volume expose the per-project directories underneath it,
 which is exactly what the scopes promise cannot happen. The dialog lists
 every rule a registration broke.
+
+### Databases
+
+Ask for a database and publix runs it, generates its credentials and hands
+them to the app — `DATABASE_URL` for the first SQL or SQLite database,
+`REDIS_URL` for Redis, `MONGODB_URL`/`MONGODB_URI` for MongoDB:
+
+```yaml
+databases:
+  - postgres          # or mysql, mongo, sqlite
+  - engine: redis
+    name: cache
+```
+
+The same can be done from the project's **Databases** tab. Backups go on a
+schedule to a host directory or, through rclone, to Google Drive, S3 and the
+like, and restore with one click. See [docs/databases.md](docs/databases.md).
 
 ### Release
 

@@ -18,8 +18,14 @@ var varRe = regexp.MustCompile(`\$\{([a-z]+)\.([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]
 //
 // Precedence, weakest first:
 //  1. publix's own metadata variables
-//  2. env declared in deployment.yaml, with ${...} references expanded
-//  3. env configured on the project in the dashboard
+//  2. connection details of the project's databases
+//  3. env declared in deployment.yaml, with ${...} references expanded
+//  4. env configured on the project in the dashboard
+//
+// Databases sit below the repository's own env so deployment.yaml can map
+// them onto whatever name an app expects — `PG_URL: ${db.DATABASE_URL}` —
+// and below the dashboard so an operator can still point an app at an
+// external database by setting DATABASE_URL there.
 //
 // The dashboard wins because that is where production credentials live, and
 // a repository must never be able to override them by editing a file.
@@ -51,6 +57,10 @@ func (e *Engine) buildEnv(dc *Context) ([]string, error) {
 	if dc.Spec != nil && dc.Spec.Port > 0 {
 		out["PORT"] = strconv.Itoa(dc.Spec.Port)
 	}
+	databases := dc.Project.DatabaseEnv()
+	for k, v := range databases {
+		out[k] = v
+	}
 
 	var unresolved []string
 	if dc.Spec != nil {
@@ -74,8 +84,10 @@ func (e *Engine) buildEnv(dc *Context) ([]string, error) {
 					val, ok = os.LookupEnv(key)
 				case "publix":
 					val, ok = meta[key]
+				case "db":
+					val, ok = databases[key]
 				default:
-					unresolved = append(unresolved, fmt.Sprintf("%s: unknown namespace %q in %s (use secret, env or publix)", k, ns, m))
+					unresolved = append(unresolved, fmt.Sprintf("%s: unknown namespace %q in %s (use secret, env, db or publix)", k, ns, m))
 					return ""
 				}
 				if !ok {

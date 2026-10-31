@@ -11,6 +11,7 @@
   import Overview from './project/Overview.svelte';
   import Deployments from './project/Deployments.svelte';
   import Logs from './project/Logs.svelte';
+  import Databases from './project/Databases.svelte';
   import Environment from './project/Environment.svelte';
   import Domains from './project/Domains.svelte';
   import ProjectSettings from './project/ProjectSettings.svelte';
@@ -41,7 +42,7 @@
     load();
   });
 
-  const tabs = ['overview', 'deployments', 'logs', 'env', 'domains', 'settings'];
+  const tabs = ['overview', 'deployments', 'logs', 'env', 'databases', 'domains', 'settings'];
 
   async function deploy() {
     deploying = true;
@@ -159,6 +160,8 @@
     <Logs {project} />
   {:else if tab === 'env'}
     <Environment {project} onchange={load} />
+  {:else if tab === 'databases'}
+    <Databases {project} onchange={load} />
   {:else if tab === 'domains'}
     <Domains {project} onchange={load} />
   {:else if tab === 'settings'}

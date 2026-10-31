@@ -280,6 +280,29 @@ func TestSharedNetworkKeepsTheImplicitDefault(t *testing.T) {
 	}
 }
 
+// A managed database answers only on the shared network, so a service
+// that is not routed — a worker, a migration job — joins it too, but
+// without aliases: it is not something a route should reach.
+func TestUnroutedServicesJoinTheNetworkOnlyForADatabase(t *testing.T) {
+	nets := sharedNetworks(compose.Service{}, "publix", nil)
+	if v, ok := nets["publix"]; !ok || v != nil {
+		t.Errorf("an unrouted service should join with no options, got %v", nets)
+	}
+
+	p := &store.Project{}
+	if needsDatabaseNetwork(p) {
+		t.Error("a project with no database pulled every service onto the shared network")
+	}
+	p.Databases = []*store.Database{{Name: "main", Engine: store.EngineSQLite}}
+	if needsDatabaseNetwork(p) {
+		t.Error("SQLite is a mounted file and needs no network")
+	}
+	p.Databases = append(p.Databases, &store.Database{Name: "pg", Engine: store.EnginePostgres})
+	if !needsDatabaseNetwork(p) {
+		t.Error("a Postgres database was not treated as needing the network")
+	}
+}
+
 // The primary service answers to the project's slug as well, because that
 // is the name a route with no service of its own reaches.
 func TestComposeAliases(t *testing.T) {

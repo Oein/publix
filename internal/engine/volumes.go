@@ -23,6 +23,9 @@ type Bind struct {
 	ReadOnly  bool
 	// Services limits the mount to named compose services. Empty means all.
 	Services []string
+	// Named marks HostPath as a docker volume name rather than a host
+	// directory, which compose has to be told about separately.
+	Named bool
 }
 
 // String renders the bind in docker's "source:target:mode" syntax.
@@ -100,6 +103,8 @@ func (e *Engine) resolveVolumes(dc *Context) ([]Bind, error) {
 			Services:  v.Services,
 		})
 	}
+
+	binds = append(binds, databaseBinds(dc.Project)...)
 
 	if len(missing) > 0 {
 		sort.Strings(missing)

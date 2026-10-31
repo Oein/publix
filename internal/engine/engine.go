@@ -355,6 +355,12 @@ func (e *Engine) run(ctx context.Context, projectID, deploymentID string, opt Op
 	if err := e.loadSpec(dc, opt); err != nil {
 		return err
 	}
+	// Databases come before the build so a missing one fails the deploy
+	// in seconds, not after ten minutes of compiling, and so it is already
+	// accepting connections when the new containers first try it.
+	if err := e.ensureDeclaredDatabases(ctx, dc); err != nil {
+		return err
+	}
 	// Catch a port another project already publishes before spending a
 	// build on it. Docker would refuse the bind at the very end, after the
 	// image was built, with a message that names neither project.

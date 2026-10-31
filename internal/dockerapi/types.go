@@ -106,6 +106,7 @@ func (ci *ContainerInspect) IPOn(network string) string {
 type CreateConfig struct {
 	Image            string              `json:"Image"`
 	Cmd              []string            `json:"Cmd,omitempty"`
+	Entrypoint       []string            `json:"Entrypoint,omitempty"`
 	Env              []string            `json:"Env,omitempty"`
 	Labels           map[string]string   `json:"Labels,omitempty"`
 	User             string              `json:"User,omitempty"`

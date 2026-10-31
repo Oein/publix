@@ -98,6 +98,15 @@ func cmdServe(ctx context.Context, args []string) error {
 		p.log.Warn("could not write Traefik's routing file", "error", err)
 	}
 
+	// Databases restart on their own after a reboot; this brings back any
+	// whose container is gone altogether. It runs in the background, since
+	// pulling an image must not hold up the dashboard.
+	go func() {
+		for _, err := range p.engine.EnsureDatabases(ctx) {
+			p.log.Warn("could not start a database", "error", err)
+		}
+	}()
+
 	scheduler := engine.NewScheduler(p.engine, p.store)
 	scheduler.OnError = func(project, job string, err error) {
 		p.log.Error("scheduled job failed", "project", project, "job", job, "error", err)

@@ -117,6 +117,15 @@ release:
   autoRollback: true          # remove a deployment that fails its health gate
   branch: main                # the branch that deploys to production
 
+# --- databases ------------------------------------------------------------
+
+databases:
+  - postgres                  # shorthand: engine only, named main → DATABASE_URL
+  - engine: redis             # postgres | mysql | mongo | redis | sqlite
+    name: cache               # lowercase, unique in the project
+    version: "7"              # image tag; fixed once created
+    envPrefix: REDIS          # REDIS_URL, REDIS_HOST, … (default by engine)
+
 # --- scheduled jobs -------------------------------------------------------
 
 cron:
