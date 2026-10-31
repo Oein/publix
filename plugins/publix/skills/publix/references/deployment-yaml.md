@@ -1,0 +1,249 @@
+# deployment.yaml — every field
+
+Looked up at the repo root as `deployment.yaml`, `deployment.yml` or
+`.publix/deployment.yaml`. Every field is optional; unknown fields and
+invalid combinations fail the deploy with a list of problems.
+
+```yaml
+# --- identity -------------------------------------------------------------
+
+name: my-app                  # defaults to the repository name
+
+# --- build ----------------------------------------------------------------
+
+# auto detects the rest. `framework` means publix generates the Dockerfile
+# from the repository's own framework configuration — which is what happens
+# for a Next.js, Nuxt, SvelteKit, Remix, Go or Python project that has not
+# written one.
+type: auto                    # auto | dockerfile | compose | framework | static | image
+context: .                    # build context, relative to the repo root
+
+dockerfile: Dockerfile        # type: dockerfile
+compose: docker-compose.yml   # type: compose
+service: web                  # type: compose — which service is exposed
+image: ghcr.io/acme/app:1.0   # type: image
+
+# Which template to use. Detected from next.config.js, svelte.config.js,
+# astro.config.mjs, nuxt.config.ts, go.mod, requirements.txt and so on, so
+# this is only needed to correct a wrong guess.
+framework: nextjs             # nextjs | nuxt | sveltekit | remix | astro |
+                              # nestjs | gatsby | docusaurus | angular |
+                              # cra | vite | node | go | django | fastapi | flask
+
+build:
+  target: ""                  # a stage of a multi-stage Dockerfile
+  pull: false                 # refresh base images every build
+  args:                       # --build-arg values; NOT available at runtime
+    VERSION: "1.0"
+
+  # Every field below is detected from the repository. Set one only to
+  # override what publix worked out.
+  install: npm ci             # from the lockfile
+  command: npm run build      # from package.json, or the framework default
+  start: npm run start        # the command the container runs
+  output: dist                # where a static build writes
+  spa: false                  # rewrite unknown paths to index.html
+  builder: node:22-alpine     # image the build runs in
+  runtime: nginx:1.27-alpine  # image the app runs in
+
+# --- runtime --------------------------------------------------------------
+
+port: 3000                    # the port your app listens on in the container
+replicas: 1                   # ignored for compose projects
+command: []                   # overrides the image's default command
+
+env:
+  NODE_ENV: production
+  DATABASE_URL: ${secret.DATABASE_URL}    # from the dashboard
+  REGION: ${env.REGION}                   # from the publix server's own env
+  BUILD: ${publix.COMMIT}                 # deployment metadata
+  LOG_LEVEL: ${secret.LOG_LEVEL:-info}    # optional, with a default
+
+resources:
+  cpu: "1"                    # fractional cores
+  memory: 512M
+  memoryReservation: 256M     # soft limit
+  pidsLimit: 0                # 0 means no limit
+
+# --- storage --------------------------------------------------------------
+
+# Volumes are registered on the server; a project names one, never a path.
+# It receives <host path>/<project id>, which is the isolation boundary.
+volumes:
+  - disk0                     # mounts at /shared/disk0
+
+  - name: uploads
+    mountPath: /var/uploads
+    subPath: ""               # a subdirectory of this project's own area
+    readOnly: false
+    services: []              # compose only; empty means every service
+
+# --- routing --------------------------------------------------------------
+
+domains:
+  - app.example.com
+
+routes:
+  - domain: www.example.com
+    redirectTo: app.example.com
+
+  - domain: example.com
+    path: /api
+    stripPath: true
+    tls: true
+    headers:
+      X-Robots-Tag: noindex
+    basicAuth:
+      - "user:$apr1$hashed"   # htpasswd format
+    service: ""               # compose only; which service this route reaches
+
+# --- health ---------------------------------------------------------------
+
+# The gate a new deployment must pass before any traffic reaches it.
+health:
+  type: http                  # http | tcp | exec | none
+  path: /
+  port: 0                     # defaults to `port` above
+  status: 200
+  command: []                 # type: exec
+  interval: 2s
+  timeout: 5s
+  grace: 90s                  # how long the app has to become healthy
+  headers: {}
+
+# --- release --------------------------------------------------------------
+
+release:
+  strategy: blue-green        # blue-green | recreate (compose is always recreate)
+  drain: 10s                  # how long the old generation keeps serving
+  autoRollback: true          # remove a deployment that fails its health gate
+  branch: main                # the branch that deploys to production
+
+# --- databases ------------------------------------------------------------
+
+databases:
+  - postgres                  # shorthand: engine only, named main → DATABASE_URL
+  - engine: redis             # postgres | mysql | mongo | redis | sqlite
+    name: cache               # lowercase, unique in the project
+    version: "7"              # image tag; fixed once created
+    envPrefix: REDIS          # REDIS_URL, REDIS_HOST, … (default by engine)
+
+# --- scheduled jobs -------------------------------------------------------
+
+cron:
+  - name: nightly
+    schedule: "0 3 * * *"     # 5-field cron, or @daily / @hourly / @weekly
+    command: ["node", "scripts/nightly.js"]
+    timeout: 1h
+    service: ""               # compose only; whose image to run
+
+# --- routing extras (see routing.md) ----------------------------------------
+
+appsDomain: none              # or the name of a registered apps domain
+
+routes:
+  - domain: git.example.com   # compose: split one host across services
+    service: backend
+    priority: 110             # higher wins; always set when hosts are shared
+    matchAny:                 # any one condition; one selector per entry
+      - pathPrefix: /api
+      - pathRegexp: /.+/.+/info/refs
+      - method: POST
+      - header: Content-Type
+        regexp: application/x-git.*
+      - query: service
+        regexp: git-.*
+
+tcp:                          # TLS passthrough by SNI
+  - sni: [mail.example.com]
+    port: 993
+    passthrough: true         # required
+    service: ""               # compose only
+
+ports:                        # raw host port; forces recreate + replicas 1
+  - host: 2222
+    container: 2222           # defaults to host
+    protocol: tcp             # tcp | udp
+    bind: ""                  # e.g. 127.0.0.1; default every address
+    service: ""               # compose: required
+```
+
+## Defaults worth knowing
+
+- `name` → repository name; becomes the slug used in hostnames and container names.
+- `type` → compose file, else Dockerfile, else framework detection, else static.
+- `port` → detected from `EXPOSE` / framework; `PORT` is injected with it.
+- `health.type` → `exec` if `command`, `http` if `path`, `tcp` if `port`, else `none`.
+- `release.strategy` → `blue-green`; compose stacks and projects with `ports:` always `recreate`.
+- `replicas` → 1; ignored for compose.
+- `volumes[].mountPath` → `/shared/<name>`.
+- `databases[].name` → `main` (`cache` for redis); env prefix `DATABASE` for
+  SQL/SQLite, `REDIS`, `MONGODB`; a second one of the same kind uses
+  `upper(name)` (e.g. `ANALYTICS_URL`).
+- `build.args` exist only at build time — use `env` for runtime values.
+
+## Examples by shape
+
+Dockerfile app with a database and uploads:
+
+```yaml
+name: notes
+port: 8080
+domains: [notes.example.com]
+databases:
+  - postgres
+volumes:
+  - name: data-hdd
+    mountPath: /app/uploads
+env:
+  JWT_SECRET: ${secret.JWT_SECRET}
+health:
+  path: /health
+```
+
+Compose stack, backend + frontend on one host, git over SSH:
+
+```yaml
+type: compose
+compose: compose.yaml
+service: frontend
+port: 3000
+appsDomain: none
+routes:
+  - domain: git.example.com
+    service: backend
+    priority: 110
+    matchAny: [{pathPrefix: /api}]
+  - domain: git.example.com
+    service: frontend
+    priority: 100
+ports:
+  - {host: 2222, service: backend}
+databases:
+  - engine: postgres
+    version: "17"
+health:
+  type: tcp
+```
+
+Prebuilt image deployed by CI (autoDeploy off on the project):
+
+```yaml
+type: image
+image: ghcr.io/acme/app:latest
+port: 8080
+domains: [app.example.com]
+databases: [sqlite]
+```
+
+Static site:
+
+```yaml
+type: static
+build:
+  install: npm ci
+  command: npm run build
+  output: dist
+  spa: true
+domains: [www.example.com]
+```

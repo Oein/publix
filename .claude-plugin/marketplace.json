@@ -1,0 +1,12 @@
+{
+  "name": "publix",
+  "owner": { "name": "Oein" },
+  "metadata": { "description": "Claude Code plugins for the publix deployment platform" },
+  "plugins": [
+    {
+      "name": "publix",
+      "source": "./plugins/publix",
+      "description": "Skill for deploying and operating apps on publix (deployment.yaml, databases, volumes, routing, MCP)."
+    }
+  ]
+}

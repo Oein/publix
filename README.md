@@ -361,8 +361,10 @@ is never modified.**
 
 - The Compose project name is stable across deploys, so named volumes
   survive a redeploy rather than being replaced with empty ones.
-- Only the routed service is attached to the shared `publix` network. The
-  rest of the stack stays on its own network, unreachable from outside.
+- Only the routed services are attached to the shared `publix` network; the
+  rest of the stack stays on its own network, unreachable from outside —
+  unless the project has a networked database, which every service then
+  joins so workers can reach it.
 - Published ports in your compose file are respected as written.
 
 ```yaml
@@ -496,6 +498,20 @@ and it grants everything the dashboard grants.
 
 Full details, including the tool list and what to know before letting an
 agent deploy, are in [docs/mcp.md](docs/mcp.md).
+
+### Claude Code skill
+
+The `publix` plugin teaches Claude Code how a repository is deployed here —
+`deployment.yaml`, managed databases and backups, volumes, routing, secrets,
+CI-triggered deploys — so it can write the file and operate the server
+without rediscovering the rules each time:
+
+```bash
+claude plugin marketplace add Oein/publix
+claude plugin install publix@publix --scope user
+```
+
+The skill lives in [plugins/publix](plugins/publix/skills/publix/SKILL.md).
 
 ---
 
