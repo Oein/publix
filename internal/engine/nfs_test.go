@@ -257,3 +257,126 @@ func (e *Engine) nfsRemove(ctx context.Context, v store.Volume, dir string) erro
 	_, err = e.docker.WaitContainer(ctx, created.ID)
 	return err
 }
+
+// TestNFSDeployLive runs whole deployments onto a real export, through both
+// ways publix starts containers, and a NAS that has gone away. Like
+// TestNFSLive it needs PUBLIX_TEST_NFS, and it writes only inside directories
+// named after the test's own projects, which it removes.
+func TestNFSDeployLive(t *testing.T) {
+	target := os.Getenv("PUBLIX_TEST_NFS")
+	if target == "" {
+		t.Skip("PUBLIX_TEST_NFS is not set")
+	}
+	server, export, ok := strings.Cut(target, ":")
+	if !ok {
+		t.Fatalf("PUBLIX_TEST_NFS = %q, want server:/export", target)
+	}
+	h := newHarness(t)
+	ctx := context.Background()
+
+	v := store.Volume{Name: "nfsdeploy", Scope: store.ScopeProject, NFS: &store.NFSMount{Server: server, Export: export}}
+	setVolume := func(vol store.Volume) {
+		t.Helper()
+		if err := h.store.SetSettings(func(s *store.Settings) error {
+			s.Volumes = []store.Volume{vol}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setVolume(v)
+
+	spec := "port: 80\nrelease:\n  drain: 0s\nvolumes:\n  - name: nfsdeploy\n    mountPath: /seeded\n"
+	dockerfile := "FROM nginx:alpine\nRUN mkdir /seeded && echo fromimage > /seeded/image.txt\n"
+	a := h.project("nfsa", map[string]string{"deployment.yaml": spec, "Dockerfile": dockerfile})
+	b := h.project("nfsb", map[string]string{"deployment.yaml": spec, "Dockerfile": dockerfile})
+	st := h.project("nfsstack", map[string]string{
+		"deployment.yaml": "type: compose\nservice: web\nport: 80\nvolumes:\n" +
+			"  - name: nfsdeploy\n    subPath: repos\n    mountPath: /data\n",
+		"docker-compose.yml": "services:\n  web:\n    image: nginx:alpine\n",
+	})
+
+	defer func() {
+		h.cleanup()
+		root := v
+		root.Scope = store.ScopeShared
+		for _, p := range []*store.Project{a, b, st} {
+			if err := h.engine.nfsRemove(ctx, root, p.ID); err != nil {
+				t.Logf("cleanup of %s: %v", p.ID, err)
+			}
+		}
+		vols, _ := h.docker.ListVolumes(ctx, nfsLabel+"=nfsdeploy")
+		for _, dv := range vols {
+			if err := h.docker.RemoveVolume(ctx, dv.Name, true); err != nil {
+				t.Logf("cleanup of %s: %v", dv.Name, err)
+			}
+		}
+	}()
+
+	exec := func(p *store.Project, script string) string {
+		t.Helper()
+		res, err := h.docker.Exec(ctx, h.oneContainer(ctx, p.ID), []string{"sh", "-c", script})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.Stdout
+	}
+
+	h.mustSucceed(h.deploy(a, Options{Trigger: "test"}))
+	h.mustSucceed(h.deploy(b, Options{Trigger: "test"}))
+
+	if got := exec(a, "grep ' /seeded nfs' /proc/mounts"); !strings.Contains(got, ":/") {
+		t.Fatalf("/seeded is not an NFS mount: %q", got)
+	}
+	// A bind never seeded a directory from the image; a volume would have.
+	if got := exec(a, "ls -A /seeded"); strings.TrimSpace(got) != "" {
+		t.Errorf("the image was copied onto the export: %q", got)
+	}
+
+	exec(a, "echo secret > /seeded/alpha.txt")
+	if got := exec(b, "ls -A /seeded"); strings.Contains(got, "alpha.txt") {
+		t.Errorf("b can see a's files: %q", got)
+	}
+
+	h.mustSucceed(h.deploy(a, Options{Trigger: "test"}))
+	if got := exec(a, "cat /seeded/alpha.txt"); !strings.Contains(got, "secret") {
+		t.Errorf("the file did not survive a redeploy: %q", got)
+	}
+
+	h.mustSucceed(h.deploy(st, Options{Trigger: "test"}))
+	if got := exec(st, "grep ' /data nfs' /proc/mounts"); !strings.Contains(got, st.ID+"/repos") {
+		t.Fatalf("compose did not mount the subPath: %q", got)
+	}
+	exec(st, "echo ok > /data/f")
+
+	// The same directory read-only, through the volume's setting.
+	ro := v
+	ro.ReadOnly = true
+	setVolume(ro)
+	h.mustSucceed(h.deploy(st, Options{Trigger: "test"}))
+	if got := exec(st, "cat /data/f; touch /data/g 2>&1 || true"); !strings.Contains(got, "ok") || !strings.Contains(got, "Read-only") {
+		t.Errorf("a read-only volume should read but not write: %q", got)
+	}
+	setVolume(v)
+
+	// The NAS goes away. 192.0.2.1 is reserved and answers nothing.
+	gone := v
+	gone.NFS = &store.NFSMount{Server: "192.0.2.1", Export: export}
+	setVolume(gone)
+	before := h.oneContainer(ctx, a.ID)
+	began := time.Now()
+	dep := h.deploy(a, Options{Trigger: "test"})
+	if dep.Status != store.StatusFailed || !strings.Contains(dep.Error, "nfsdeploy") {
+		t.Fatalf("deploy ended %s: %s", dep.Status, dep.Error)
+	}
+	if took := time.Since(began); took > 30*time.Second {
+		t.Errorf("failing took %s; the probe should beat the daemon's mount timeout", took)
+	}
+	setVolume(v)
+	if after := h.oneContainer(ctx, a.ID); after != before {
+		t.Error("a failed deploy replaced the running container")
+	}
+	if got := exec(a, "cat /seeded/alpha.txt"); !strings.Contains(got, "secret") {
+		t.Errorf("the running container lost its mount: %q", got)
+	}
+}
