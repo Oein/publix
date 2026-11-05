@@ -113,6 +113,17 @@ func cmdServe(ctx context.Context, args []string) error {
 	}
 	go scheduler.Run(ctx)
 
+	// A NAS that comes up after the host leaves containers stopped for good
+	// unless something tries them again.
+	watcher := engine.NewNFSWatcher(p.engine, p.store)
+	watcher.OnStart = func(container string) {
+		p.log.Info("started a container that was waiting for NFS", "container", container)
+	}
+	watcher.OnError = func(container string, err error) {
+		p.log.Warn("could not start a container waiting for NFS", "container", container, "error", err)
+	}
+	go watcher.Run(ctx)
+
 	httpServer := &http.Server{
 		Addr:    *addr,
 		Handler: srv.Handler(),

@@ -20,9 +20,17 @@ type Container struct {
 	State           string            `json:"State"`
 	Status          string            `json:"Status"`
 	Labels          map[string]string `json:"Labels"`
+	Mounts          []ContainerMount  `json:"Mounts"`
 	NetworkSettings *struct {
 		Networks map[string]EndpointSettings `json:"Networks"`
 	} `json:"NetworkSettings"`
+}
+
+// ContainerMount is one mount in a container summary.
+type ContainerMount struct {
+	Type string `json:"Type"`
+	// Name is the docker volume's name, empty for a bind.
+	Name string `json:"Name"`
 }
 
 // Name returns the container's primary name without the leading slash.

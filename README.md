@@ -254,6 +254,10 @@ volumes:
 | **Project volume** | `<path>/<project-id>` | its own uploads, cache, database |
 | **Shared volume** | `<path>` itself | a dataset or media library several projects share |
 
+A volume can also be an NFS export that publix mounts itself, which is safer
+than a host mount: a container refuses to start without the export instead of
+quietly using an empty local directory. See [docs/nfs.md](docs/nfs.md).
+
 A project volume is named after the project ID, which never changes even if
 you rename the project, so renaming can never orphan or expose its data. A
 shared volume has no isolation at all — that is what it is for, and why it
@@ -449,6 +453,7 @@ publix rollback <project> [-to ID]    roll back
 publix logs <project> [-f]            runtime logs
 publix logs <project> -build <ID>     a deployment's build log
 publix volumes [-add name=/path]      list or register shared volumes
+                                      (name=nfs://server/export for NFS)
 publix validate [DIR]                 check a deployment.yaml before pushing
 publix reconcile                      rewrite Traefik's routing file
 publix mcp                            serve publix to an AI agent

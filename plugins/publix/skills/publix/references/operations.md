@@ -33,7 +33,7 @@
 - GitHub: `github_status`, `connect_github`, `disconnect_github`, `list_repos`, `inspect_repo`, `import_repo`
 - Server: `get_settings`, `update_settings`, `add_apps_domain`, `set_default_apps_domain`, `delete_apps_domain`
 - Routing: `add_proxy`, `update_proxy`, `delete_proxy`, `add_redirect`, `update_redirect`, `delete_redirect`
-- Storage: `add_volume`, `delete_volume`; backup targets: `list_backup_targets`, `add_backup_target`, `test_backup_target`, `delete_backup_target`
+- Storage: `add_volume`, `delete_volume`, `set_volume_nfs`, `clear_volume_nfs`; backup targets: `list_backup_targets`, `add_backup_target`, `test_backup_target`, `delete_backup_target`
 
 ## Deploy lifecycle
 
@@ -62,6 +62,13 @@ autoDeploy is on.
 - Traefik: `publix-traefik-1`; publix itself: `publix-publix-1`
 
 ## Volumes: registering one (server side)
+
+For storage on a NAS, register an NFS volume (`nfsServer` and `nfsExport` on
+`add_volume`, an IP rather than a `.local` name) so publix does the mount and a
+container will not start on an empty directory. Move an existing volume with
+`set_volume_nfs`, pointing at the export it already reads, then redeploy the
+projects using it. Containers stopped because the NAS was away are restarted
+automatically once it answers.
 
 publix runs in a container but creates containers on the host, so a host
 path must be mounted into publix **at the same path**: add

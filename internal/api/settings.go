@@ -145,7 +145,14 @@ func (s *Server) settingsView() settingsView {
 		if view.UsedBy == nil {
 			view.UsedBy = []string{}
 		}
-		if st, err := os.Stat(sv.Path); err == nil && st.IsDir() {
+		if sv.IsNFS() {
+			if err := engine.NFSReachable(context.Background(), sv); err != nil {
+				view.Error = err.Error()
+			} else {
+				view.Exists = true
+				view.Writable = !sv.ReadOnly
+			}
+		} else if st, err := os.Stat(sv.Path); err == nil && st.IsDir() {
 			view.Exists = true
 			view.Writable = isWritableDir(sv.Path)
 			if !view.Writable {
@@ -269,6 +276,11 @@ func (s *Server) handleAddVolume(w http.ResponseWriter, r *http.Request) {
 		DefaultMount string `json:"defaultMount"`
 		// Create makes the host directory if it does not exist.
 		Create bool `json:"create"`
+		// NFSServer and NFSExport register an export publix mounts itself,
+		// in place of a host path.
+		NFSServer  string `json:"nfsServer"`
+		NFSExport  string `json:"nfsExport"`
+		NFSOptions string `json:"nfsOptions"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -284,16 +296,45 @@ func (s *Server) handleAddVolume(w http.ResponseWriter, r *http.Request) {
 
 	v := store.Volume{
 		Name:         strings.TrimSpace(body.Name),
-		Path:         filepath.Clean(strings.TrimSpace(body.Path)),
 		Scope:        scope,
 		Description:  strings.TrimSpace(body.Description),
 		ReadOnly:     body.ReadOnly,
 		DefaultMount: strings.TrimSpace(body.DefaultMount),
 	}
+	if server := strings.TrimSpace(body.NFSServer); server != "" || strings.TrimSpace(body.NFSExport) != "" {
+		v.NFS = &store.NFSMount{
+			Server:  server,
+			Export:  strings.TrimSpace(body.NFSExport),
+			Options: strings.TrimSpace(body.NFSOptions),
+		}
+	} else {
+		v.Path = filepath.Clean(strings.TrimSpace(body.Path))
+	}
 
 	set := s.store.Settings()
 	if err := set.ValidateVolume(v, ""); err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	// An export needs none of the host-path checks below. It is proven by
+	// mounting it, so a typo fails here and not on a project's next deploy.
+	if v.IsNFS() {
+		if err := s.engine.CheckNFS(r.Context(), v); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if err := s.store.SetSettings(func(set *store.Settings) error {
+			if err := set.ValidateVolume(v, ""); err != nil {
+				return err
+			}
+			set.Volumes = append(set.Volumes, v)
+			return nil
+		}); err != nil {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, s.settingsView())
 		return
 	}
 
@@ -334,6 +375,88 @@ func (s *Server) handleAddVolume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, s.settingsView())
+}
+
+// handleSetVolumeNFS moves a registered volume onto an export publix mounts
+// itself. The layout stays the same, <export>/<project id>, so pointing it at
+// the export a host mount already reads changes who mounts it and nothing
+// about where the data lives. Running containers keep their current mounts
+// until their next deploy.
+func (s *Server) handleSetVolumeNFS(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	var body struct {
+		Server  string `json:"server"`
+		Export  string `json:"export"`
+		Options string `json:"options"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	set := s.store.Settings()
+	v, ok := set.Volume(name)
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("no volume named %q", name))
+		return
+	}
+	v.NFS = &store.NFSMount{
+		Server:  strings.TrimSpace(body.Server),
+		Export:  strings.TrimSpace(body.Export),
+		Options: strings.TrimSpace(body.Options),
+	}
+	if err := set.ValidateVolume(v, name); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.engine.CheckNFS(r.Context(), v); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	s.replaceVolume(w, name, func(vol *store.Volume) error {
+		vol.NFS = v.NFS
+		return nil
+	})
+}
+
+// handleClearVolumeNFS puts a converted volume back on its host path.
+func (s *Server) handleClearVolumeNFS(w http.ResponseWriter, r *http.Request) {
+	s.replaceVolume(w, r.PathValue("name"), func(vol *store.Volume) error {
+		if vol.Path == "" {
+			return fmt.Errorf("%q was registered as NFS and has no host path to go back to", vol.Name)
+		}
+		vol.NFS = nil
+		return nil
+	})
+}
+
+// replaceVolume edits one registered volume and answers with the settings.
+func (s *Server) replaceVolume(w http.ResponseWriter, name string, edit func(*store.Volume) error) {
+	var found bool
+	if err := s.store.SetSettings(func(set *store.Settings) error {
+		for i := range set.Volumes {
+			if set.Volumes[i].Name != name {
+				continue
+			}
+			found = true
+			next := set.Volumes[i]
+			if err := edit(&next); err != nil {
+				return err
+			}
+			if err := set.ValidateVolume(next, name); err != nil {
+				return err
+			}
+			set.Volumes[i] = next
+		}
+		return nil
+	}); err != nil {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, fmt.Errorf("no volume named %q", name))
+		return
+	}
+	writeJSON(w, http.StatusOK, s.settingsView())
 }
 
 // handleDeleteVolume unregisters a volume. The host directory and

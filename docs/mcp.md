@@ -98,7 +98,7 @@ the two routes offer exactly the same tools.
 **Routing** — `add_proxy`, `update_proxy`, `delete_proxy`, `add_redirect`,
 `update_redirect`, `delete_redirect`
 
-**Storage** — `add_volume`, `delete_volume`
+**Storage** — `add_volume`, `delete_volume`, `set_volume_nfs`, `clear_volume_nfs`
 
 **Backup targets** — `list_backup_targets`, `add_backup_target`,
 `test_backup_target`, `delete_backup_target`

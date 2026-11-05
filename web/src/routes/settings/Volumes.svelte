@@ -23,6 +23,8 @@
   let settings = $state(null);
   let adding = $state(false);
   let removing = $state(null);
+  // The volume being moved onto an export, when the NFS dialog is open.
+  let converting = $state(null);
 
   let name = $state('');
   let path = $state('');
@@ -30,11 +32,21 @@
   let description = $state('');
   let readOnly = $state(false);
   let create = $state(true);
+  let source = $state('nfs');
+  let nfsServer = $state('');
+  let nfsExport = $state('');
+  let nfsOptions = $state('');
   let saving = $state(false);
   // The server is the authority on what a volume may point at, and its
   // refusal belongs next to the field that caused it rather than in a
   // toast in the corner while the form is still open.
   let addError = $state(null);
+
+  // What a register button needs before it can do anything useful.
+  const sourceReady = $derived(source === 'nfs' ? nfsServer.trim() && nfsExport.trim() : path.trim());
+  const previewPath = $derived(
+    source === 'nfs' ? `${nfsServer.trim()}:${nfsExport.trim()}` : path.trim(),
+  );
 
   const projectVolumes = $derived((settings?.volumes ?? []).filter((v) => v.scope !== 'shared'));
   const sharedVolumes = $derived((settings?.volumes ?? []).filter((v) => v.scope === 'shared'));
@@ -59,8 +71,47 @@
     description = '';
     readOnly = false;
     create = true;
+    source = 'nfs';
+    nfsServer = '';
+    nfsExport = '';
+    nfsOptions = '';
     addError = null;
     adding = true;
+  }
+
+  function openConvert(vol) {
+    nfsServer = '';
+    nfsExport = '';
+    nfsOptions = '';
+    addError = null;
+    converting = vol;
+  }
+
+  async function convert() {
+    saving = true;
+    addError = null;
+    try {
+      settings = await api.settings.setVolumeNFS(converting.name, {
+        server: nfsServer.trim(),
+        export: nfsExport.trim(),
+        options: nfsOptions.trim(),
+      });
+      notify.success(t('vol.nfsConverted', { name: converting.name }));
+      converting = null;
+    } catch (err) {
+      addError = { message: err.message, details: err.details ?? [] };
+    } finally {
+      saving = false;
+    }
+  }
+
+  async function revert(vol) {
+    try {
+      settings = await api.settings.clearVolumeNFS(vol.name);
+      notify.success(t('vol.nfsReverted', { name: vol.name }));
+    } catch (err) {
+      notify.error(err);
+    }
   }
 
   async function add() {
@@ -69,11 +120,12 @@
     try {
       settings = await api.settings.addVolume({
         name: name.trim(),
-        path: path.trim(),
         scope,
         description: description.trim(),
         readOnly,
-        create,
+        ...(source === 'nfs'
+          ? { nfsServer: nfsServer.trim(), nfsExport: nfsExport.trim(), nfsOptions: nfsOptions.trim() }
+          : { path: path.trim(), create }),
       });
       notify.success(t('vol.registered', { name: name.trim() }));
       adding = false;
@@ -115,6 +167,7 @@
             <td>
               <div class="cell">
                 <code>{vol.name}</code>
+                {#if vol.nfs}<Badge tone="muted">NFS</Badge>{/if}
                 {#if vol.readOnly}<Badge tone="muted">{t('vol.readOnly')}</Badge>{/if}
                 {#if vol.error}<Badge tone="bad">{vol.error}</Badge>{/if}
               </div>
@@ -130,6 +183,11 @@
               {/if}
             </td>
             <td class="actions">
+              {#if !vol.nfs}
+                <Button size="sm" onclick={() => openConvert(vol)}>{t('vol.nfsConvert')}</Button>
+              {:else if vol.path}
+                <Button size="sm" onclick={() => revert(vol)}>{t('vol.nfsRevert')}</Button>
+              {/if}
               <Button size="sm" variant="danger" onclick={() => (removing = vol)}>
                 {t('vol.unregister')}
               </Button>
@@ -139,6 +197,39 @@
       </tbody>
     </table>
   </div>
+{/snippet}
+
+{#snippet nfsFields()}
+  <Field label={t('vol.nfsServer')} hint={t('vol.nfsServerHint')} required>
+    {#snippet children(id)}
+      <input {id} bind:value={nfsServer} placeholder="192.168.20.175" autocomplete="off" spellcheck="false" />
+    {/snippet}
+  </Field>
+  <Field label={t('vol.nfsExport')} hint={t('vol.nfsExportHint')} required>
+    {#snippet children(id)}
+      <input {id} bind:value={nfsExport} placeholder="/mnt/tank/data" autocomplete="off" spellcheck="false" />
+    {/snippet}
+  </Field>
+  <Field label={t('vol.nfsOptions')} hint={t('vol.nfsOptionsHint')}>
+    {#snippet children(id)}
+      <input {id} bind:value={nfsOptions} placeholder="nfsvers=3,hard,timeo=600,retrans=2,noatime" autocomplete="off" spellcheck="false" />
+    {/snippet}
+  </Field>
+{/snippet}
+
+{#snippet rejected()}
+  {#if addError}
+    <div class="failed small" role="alert">
+      <strong>{t('vol.rejected')}</strong>
+      {#if addError.details.length}
+        <ul>
+          {#each addError.details as detail}<li>{detail}</li>{/each}
+        </ul>
+      {:else}
+        <p>{addError.message}</p>
+      {/if}
+    </div>
+  {/if}
 {/snippet}
 
 <Card title={t('vol.projectTitle')} description={t('vol.projectDesc')} flush>
@@ -203,15 +294,33 @@
         {/snippet}
       </Field>
 
-      <Field
-        label={t('vol.path')}
-        hint={scope === 'shared' ? t('vol.pathHintShared') : t('vol.pathHintProject')}
-        required
-      >
-        {#snippet children(id)}
-          <input {id} bind:value={path} placeholder="/mnt/data" autocomplete="off" spellcheck="false" />
-        {/snippet}
-      </Field>
+      <div class="sources" role="radiogroup" aria-label={t('vol.source')}>
+        <label class="check">
+          <input type="radio" bind:group={source} value="nfs" />
+          <span>
+            {t('vol.sourceNFS')}
+            <span class="small muted">{t('vol.sourceNFSHint')}</span>
+          </span>
+        </label>
+        <label class="check">
+          <input type="radio" bind:group={source} value="host" />
+          <span>{t('vol.sourceHost')}</span>
+        </label>
+      </div>
+
+      {#if source === 'nfs'}
+        {@render nfsFields()}
+      {:else}
+        <Field
+          label={t('vol.path')}
+          hint={scope === 'shared' ? t('vol.pathHintShared') : t('vol.pathHintProject')}
+          required
+        >
+          {#snippet children(id)}
+            <input {id} bind:value={path} placeholder="/mnt/data" autocomplete="off" spellcheck="false" />
+          {/snippet}
+        </Field>
+      {/if}
 
       <Field label={t('vol.description')} hint={t('vol.descriptionHint')}>
         {#snippet children(id)}
@@ -224,10 +333,12 @@
         {/snippet}
       </Field>
 
-      <label class="check">
-        <input type="checkbox" bind:checked={create} />
-        <span>{t('vol.create')}</span>
-      </label>
+      {#if source !== 'nfs'}
+        <label class="check">
+          <input type="checkbox" bind:checked={create} />
+          <span>{t('vol.create')}</span>
+        </label>
+      {/if}
 
       <label class="check">
         <input type="checkbox" bind:checked={readOnly} />
@@ -237,33 +348,22 @@
         </span>
       </label>
 
-      {#if addError}
-        <div class="failed small" role="alert">
-          <strong>{t('vol.rejected')}</strong>
-          {#if addError.details.length}
-            <ul>
-              {#each addError.details as detail}<li>{detail}</li>{/each}
-            </ul>
-          {:else}
-            <p>{addError.message}</p>
-          {/if}
-        </div>
-      {/if}
+      {@render rejected()}
 
       <!-- The preview describes what registering would do, so it must not
            keep promising that after the server refused. -->
-      {#if !addError && name.trim() && path.trim()}
+      {#if !addError && name.trim() && sourceReady}
         <div class="preview small" class:sharedPreview={scope === 'shared'}>
           {#if scope === 'shared'}
             {#each tparts('vol.previewShared') as part}{#if part.slot === 'every'}<strong
                 >{t('vol.every')}</strong
-              >{:else if part.slot === 'path'}<code>{path.trim()}</code
+              >{:else if part.slot === 'path'}<code>{previewPath}</code
               >{:else if part.slot === 'mount'}<code>/shared/{name.trim()}</code
               >{:else}{part.text}{/if}{/each}
           {:else}
             {#each tparts('vol.previewProject') as part}{#if part.slot === 'id'}<code
                 >abcd1234</code
-              >{:else if part.slot === 'path'}<code>{path.trim()}/abcd1234</code
+              >{:else if part.slot === 'path'}<code>{previewPath}/abcd1234</code
               >{:else if part.slot === 'mount'}<code>/shared/{name.trim()}</code
               >{:else}{part.text}{/if}{/each}
           {/if}
@@ -273,8 +373,30 @@
 
     {#snippet footer()}
       <Button variant="ghost" onclick={() => (adding = false)}>{t('common.cancel')}</Button>
-      <Button variant="primary" pending={saving} disabled={!name.trim() || !path.trim()} onclick={add}>
+      <Button variant="primary" pending={saving} disabled={!name.trim() || !sourceReady} onclick={add}>
         {t('vol.registerButton')}
+      </Button>
+    {/snippet}
+  </Modal>
+{/if}
+
+{#if converting}
+  <Modal title={t('vol.nfsConvertTitle', { name: converting.name })} onclose={() => (converting = null)}>
+    <div class="form">
+      <p class="muted small">{t('vol.nfsConvertBlurb')}</p>
+      {@render nfsFields()}
+      {@render rejected()}
+    </div>
+
+    {#snippet footer()}
+      <Button variant="ghost" onclick={() => (converting = null)}>{t('common.cancel')}</Button>
+      <Button
+        variant="primary"
+        pending={saving}
+        disabled={!nfsServer.trim() || !nfsExport.trim()}
+        onclick={convert}
+      >
+        {t('vol.nfsConvert')}
       </Button>
     {/snippet}
   </Modal>
@@ -283,7 +405,7 @@
 {#if removing}
   <Confirm
     title={t('vol.unregisterTitle', { name: removing.name })}
-    message={t('vol.unregisterMessage', { path: removing.path })}
+    message={t('vol.unregisterMessage', { path: removing.example })}
     confirmLabel={t('vol.unregister')}
     danger
     onconfirm={remove}
@@ -292,6 +414,11 @@
 {/if}
 
 <style>
+  .sources {
+    display: grid;
+    gap: 6px;
+  }
+
   .cell {
     display: flex;
     align-items: center;

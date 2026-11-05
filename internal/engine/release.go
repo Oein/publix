@@ -74,7 +74,7 @@ func (e *Engine) startContainers(ctx context.Context, dc *Context) ([]string, er
 	if err != nil {
 		return nil, err
 	}
-	binds, err := e.resolveVolumes(dc)
+	binds, err := e.resolveVolumes(ctx, dc)
 	if err != nil {
 		return nil, err
 	}
