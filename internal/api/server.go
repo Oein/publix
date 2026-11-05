@@ -153,6 +153,8 @@ func (s *Server) buildRoutes() *http.ServeMux {
 	mux.HandleFunc("DELETE /api/redirects/{domain}", auth(s.handleDeleteRedirect))
 	mux.HandleFunc("POST /api/volumes", auth(s.handleAddVolume))
 	mux.HandleFunc("DELETE /api/volumes/{name}", auth(s.handleDeleteVolume))
+	mux.HandleFunc("PUT /api/volumes/{name}/nfs", auth(s.handleSetVolumeNFS))
+	mux.HandleFunc("DELETE /api/volumes/{name}/nfs", auth(s.handleClearVolumeNFS))
 	mux.HandleFunc("GET /api/backup-targets", auth(s.handleListBackupTargets))
 	mux.HandleFunc("POST /api/backup-targets", auth(s.handleAddBackupTarget))
 	mux.HandleFunc("POST /api/backup-targets/{name}/test", auth(s.handleTestBackupTarget))

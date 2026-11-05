@@ -57,7 +57,7 @@ func (e *Engine) runCronJob(ctx context.Context, projectID, deploymentID, jobNam
 	if err != nil {
 		return err
 	}
-	binds, err := e.resolveVolumes(dc)
+	binds, err := e.resolveVolumes(ctx, dc)
 	if err != nil {
 		return err
 	}

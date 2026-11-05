@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -26,13 +27,23 @@ type Bind struct {
 	// Named marks HostPath as a docker volume name rather than a host
 	// directory, which compose has to be told about separately.
 	Named bool
+	// NoCopy stops Docker seeding an empty named volume from the image. A
+	// host bind never did that, so a volume moved to NFS must not start.
+	NoCopy bool
 }
 
 // String renders the bind in docker's "source:target:mode" syntax.
 func (b Bind) String() string {
 	s := b.HostPath + ":" + b.MountPath
+	var modes []string
 	if b.ReadOnly {
-		s += ":ro"
+		modes = append(modes, "ro")
+	}
+	if b.NoCopy {
+		modes = append(modes, "nocopy")
+	}
+	if len(modes) > 0 {
+		s += ":" + strings.Join(modes, ",")
 	}
 	return s
 }
@@ -45,7 +56,7 @@ func (b Bind) String() string {
 // decision, and it depends on the volume's scope — a project-scoped volume
 // gives this project its own directory, a shared one gives every project
 // the same directory. A repository cannot influence either way.
-func (e *Engine) resolveVolumes(dc *Context) ([]Bind, error) {
+func (e *Engine) resolveVolumes(ctx context.Context, dc *Context) ([]Bind, error) {
 	if dc.Spec == nil {
 		return nil, nil
 	}
@@ -63,6 +74,29 @@ func (e *Engine) resolveVolumes(dc *Context) ([]Bind, error) {
 		// A volume the operator marked read-only stays read-only no matter
 		// what the repository asks for.
 		readOnly := v.ReadOnly || sv.ReadOnly
+
+		mount := v.Mount()
+		if v.MountPath == "" && sv.DefaultMount != "" {
+			mount = sv.DefaultMount
+		}
+
+		if sv.IsNFS() {
+			name, err := e.prepareNFS(ctx, sv, dc.Project.ID, v.SubPath, readOnly)
+			if err != nil {
+				return nil, err
+			}
+			binds = append(binds, Bind{
+				Volume:    v.Name,
+				Shared:    sv.Shared(),
+				HostPath:  name,
+				MountPath: mount,
+				ReadOnly:  readOnly,
+				Services:  v.Services,
+				Named:     true,
+				NoCopy:    true,
+			})
+			continue
+		}
 
 		// Read-only mounts are used as they are: the container cannot write
 		// to them, so there is no reason to create or chmod anything — and
@@ -87,11 +121,6 @@ func (e *Engine) resolveVolumes(dc *Context) ([]Bind, error) {
 			if err != nil {
 				return nil, err
 			}
-		}
-
-		mount := v.Mount()
-		if v.MountPath == "" && sv.DefaultMount != "" {
-			mount = sv.DefaultMount
 		}
 
 		binds = append(binds, Bind{

@@ -160,6 +160,10 @@ ssh -L 4321:127.0.0.1:4321 you@your-server
 
 ## Volumes: the one rule
 
+If the directory is on a NAS, register the export as an
+[NFS volume](nfs.md) instead. publix mounts it itself, and none of this
+section applies.
+
 publix runs in a container but creates containers on the **host**. It hands
 paths to the Docker daemon, and the daemon resolves them on the host — so a
 path that means one thing inside publix's container and another outside

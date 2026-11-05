@@ -117,6 +117,13 @@ func (c *Client) EnsureVolume(ctx context.Context, name string, labels map[strin
 	return c.postJSON(ctx, "/volumes/create", nil, body, nil)
 }
 
+// CreateVolume creates a named volume with driver options. Asking again for
+// a volume with the same name and options is a no-op.
+func (c *Client) CreateVolume(ctx context.Context, name, driver string, opts, labels map[string]string) error {
+	body := map[string]any{"Name": name, "Driver": driver, "DriverOpts": opts, "Labels": labels}
+	return c.postJSON(ctx, "/volumes/create", nil, body, nil)
+}
+
 // RemoveVolume deletes a named volume.
 func (c *Client) RemoveVolume(ctx context.Context, name string, force bool) error {
 	q := url.Values{}

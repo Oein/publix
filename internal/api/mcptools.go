@@ -778,12 +778,15 @@ func (s *Server) mcpTools() []mcpTool {
 		{
 			name:   "add_volume",
 			title:  "Register a volume",
-			desc:   "Register a host directory that projects can mount by name, without ever seeing its path. A project-scoped volume gives each project its own subdirectory, so two projects mounting the same one cannot read each other's files; a shared one gives every project the same directory, for a dataset they genuinely share. Project scope is the safe default.",
+			desc:   "Register a directory that projects can mount by name, without ever seeing its path: a host directory, or an NFS export publix mounts itself. Prefer NFS over a host path that is itself a host NFS mount, because a container refuses to start when an export is unavailable instead of silently using an empty local directory. A project-scoped volume gives each project its own subdirectory, so two projects mounting the same one cannot read each other's files; a shared one gives every project the same directory, for a dataset they genuinely share. Project scope is the safe default.",
 			method: http.MethodPost,
 			path:   "/api/volumes",
-			schema: schemaOf([]string{"name", "path"}, map[string]mcp.Property{
+			schema: schemaOf([]string{"name"}, map[string]mcp.Property{
 				"name":         mcpString("The name projects ask for in their deployment.yaml."),
-				"path":         mcpString("Absolute path to the host directory."),
+				"path":         mcpString("Absolute path to the host directory. Required unless nfsServer is set."),
+				"nfsServer":    mcpString("NFS server address, preferably an IP. Use with nfsExport instead of path."),
+				"nfsExport":    mcpString("Absolute path of the export on the NFS server."),
+				"nfsOptions":   mcpString("Mount options replacing the defaults (nfsvers=3,hard,timeo=600,retrans=2,noatime)."),
 				"scope":        mcpEnum("project gives each project its own subdirectory; shared gives every project the same directory. Defaults to project.", string(store.ScopeProject), string(store.ScopeShared)),
 				"description":  mcpString("A note about what this directory holds."),
 				"readOnly":     mcpBool("Mount it read-only in every project."),
@@ -802,6 +805,31 @@ func (s *Server) mcpTools() []mcpTool {
 				"name": mcpString("The registered volume's name."),
 			}),
 			hints: removes(),
+		},
+		{
+			name:   "set_volume_nfs",
+			title:  "Move a volume onto NFS",
+			desc:   "Have publix mount a registered volume from an NFS export itself. Point it at the export the host path already reads and the data does not move, since both use <export>/<project id>. The export is test-mounted first. Containers keep their current mounts until each project is redeployed.",
+			method: http.MethodPut,
+			path:   "/api/volumes/{name}/nfs",
+			schema: schemaOf([]string{"name", "server", "export"}, map[string]mcp.Property{
+				"name":    mcpString("The registered volume's name."),
+				"server":  mcpString("NFS server address, preferably an IP."),
+				"export":  mcpString("Absolute path of the export on the server."),
+				"options": mcpString("Mount options replacing the defaults."),
+			}),
+			hints: replaces(),
+		},
+		{
+			name:   "clear_volume_nfs",
+			title:  "Move a volume back to its host path",
+			desc:   "Undo set_volume_nfs. Only possible for a volume that still has a host path. Containers keep their mounts until each project is redeployed.",
+			method: http.MethodDelete,
+			path:   "/api/volumes/{name}/nfs",
+			schema: schemaOf([]string{"name"}, map[string]mcp.Property{
+				"name": mcpString("The registered volume's name."),
+			}),
+			hints: replaces(),
 		},
 
 		// --- Backup targets -------------------------------------------

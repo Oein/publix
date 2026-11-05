@@ -247,7 +247,10 @@ func cmdLogs(ctx context.Context, args []string) error {
 
 func cmdVolumes(ctx context.Context, args []string) error {
 	fs := flagSet("volumes")
-	add := fs.String("add", "", "register a volume as name=/host/path")
+	add := fs.String("add", "", "register a volume as name=/host/path or name=nfs://server/export")
+	nfs := fs.String("nfs", "", "move a volume onto an export as name=nfs://server/export; redeploy projects to apply")
+	nfsOptions := fs.String("nfs-options", "", "mount options replacing the NFS defaults")
+	noNFS := fs.String("no-nfs", "", "move a volume back to its host path")
 	shared := fs.Bool("shared", false, "every project mounts the same directory, rather than one of its own")
 	remove := fs.String("rm", "", "unregister a volume by name")
 	if err := fs.Parse(args); err != nil {
@@ -259,6 +262,24 @@ func cmdVolumes(ctx context.Context, args []string) error {
 	}
 
 	switch {
+	case *nfs != "":
+		name, raw, ok := strings.Cut(*nfs, "=")
+		source, isNFS := store.ParseNFSURL(raw)
+		if !ok || !isNFS {
+			return fmt.Errorf("usage: publix volumes -nfs name=nfs://server/export")
+		}
+		source.Options = *nfsOptions
+		if err := setVolumeNFS(st, strings.TrimSpace(name), &source); err != nil {
+			return err
+		}
+		fmt.Printf("%q now mounts %s. Redeploy the projects using it to apply.\n", name, raw)
+		return nil
+	case *noNFS != "":
+		if err := setVolumeNFS(st, *noNFS, nil); err != nil {
+			return err
+		}
+		fmt.Printf("%q is back on its host path. Redeploy the projects using it to apply.\n", *noNFS)
+		return nil
 	case *add != "":
 		name, path, ok := strings.Cut(*add, "=")
 		if !ok {
@@ -268,17 +289,21 @@ func cmdVolumes(ctx context.Context, args []string) error {
 		if *shared {
 			scope = store.ScopeShared
 		}
-		v := store.Volume{
-			Name:  strings.TrimSpace(name),
-			Path:  filepath.Clean(strings.TrimSpace(path)),
-			Scope: scope,
+		v := store.Volume{Name: strings.TrimSpace(name), Scope: scope}
+		if source, isNFS := store.ParseNFSURL(path); isNFS {
+			source.Options = *nfsOptions
+			v.NFS = &source
+		} else {
+			v.Path = filepath.Clean(strings.TrimSpace(path))
 		}
 		set := st.Settings()
 		if err := set.ValidateVolume(v, ""); err != nil {
 			return err
 		}
-		if err := os.MkdirAll(v.Path, 0o755); err != nil {
-			return fmt.Errorf("creating %s: %w", v.Path, err)
+		if !v.IsNFS() {
+			if err := os.MkdirAll(v.Path, 0o755); err != nil {
+				return fmt.Errorf("creating %s: %w", v.Path, err)
+			}
 		}
 		if err := st.SetSettings(func(set *store.Settings) error {
 			if err := set.ValidateVolume(v, ""); err != nil {
@@ -289,7 +314,7 @@ func cmdVolumes(ctx context.Context, args []string) error {
 		}); err != nil {
 			return err
 		}
-		fmt.Printf("Registered %q at %s. Projects mount it at %s.\n", v.Name, v.Path, v.Mount())
+		fmt.Printf("Registered %q at %s. Projects mount it at %s.\n", v.Name, v.Dir(""), v.Mount())
 		if v.Shared() {
 			fmt.Printf("Every project that mounts it reads and writes the same directory.\n")
 		} else {
@@ -331,7 +356,7 @@ func cmdVolumes(ctx context.Context, args []string) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tSCOPE\tHOST PATH\tMOUNTS AT\tUSED BY")
+	fmt.Fprintln(tw, "NAME\tSCOPE\tSOURCE\tMOUNTS AT\tUSED BY")
 	projects := st.Projects()
 	for _, v := range set.Volumes {
 		users := engine.VolumeUsage(projects, v.Name)
@@ -344,6 +369,36 @@ func cmdVolumes(ctx context.Context, args []string) error {
 	tw.Flush()
 	fmt.Printf("\nproject  each project gets its own directory inside the host path\n")
 	fmt.Printf("shared   every project reads and writes the same directory\n")
+	return nil
+}
+
+// setVolumeNFS moves a registered volume onto an export, or back off one.
+func setVolumeNFS(st *store.Store, name string, source *store.NFSMount) error {
+	var found bool
+	err := st.SetSettings(func(set *store.Settings) error {
+		for i := range set.Volumes {
+			if set.Volumes[i].Name != name {
+				continue
+			}
+			found = true
+			next := set.Volumes[i]
+			if source == nil && next.Path == "" {
+				return fmt.Errorf("%q was registered as NFS and has no host path to go back to", name)
+			}
+			next.NFS = source
+			if err := set.ValidateVolume(next, name); err != nil {
+				return err
+			}
+			set.Volumes[i] = next
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("no volume named %q", name)
+	}
 	return nil
 }
 

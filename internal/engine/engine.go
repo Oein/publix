@@ -391,7 +391,7 @@ func (e *Engine) prepare(ctx context.Context, dc *Context) error {
 	}); err != nil {
 		return fmt.Errorf("creating the %q network: %w", dc.Settings.Network, err)
 	}
-	if _, err := e.resolveVolumes(dc); err != nil {
+	if _, err := e.resolveVolumes(ctx, dc); err != nil {
 		return err
 	}
 	return nil

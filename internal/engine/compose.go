@@ -40,7 +40,7 @@ func (e *Engine) startCompose(ctx context.Context, dc *Context) ([]string, error
 		return nil, err
 	}
 
-	overridePath, err := e.writeComposeOverride(dc, f)
+	overridePath, err := e.writeComposeOverride(ctx, dc, f)
 	if err != nil {
 		return nil, err
 	}
@@ -74,12 +74,12 @@ func (e *Engine) startCompose(ctx context.Context, dc *Context) ([]string, error
 
 // writeComposeOverride generates publix's additions to the stack. It lives
 // outside the checkout so a build never dirties the repository.
-func (e *Engine) writeComposeOverride(dc *Context, f *compose.File) (string, error) {
+func (e *Engine) writeComposeOverride(ctx context.Context, dc *Context, f *compose.File) (string, error) {
 	env, err := e.buildEnv(dc)
 	if err != nil {
 		return "", err
 	}
-	binds, err := e.resolveVolumes(dc)
+	binds, err := e.resolveVolumes(ctx, dc)
 	if err != nil {
 		return "", err
 	}

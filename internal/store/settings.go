@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -236,8 +237,13 @@ func (r Redirect) TargetURL() string {
 type Volume struct {
 	// Name is what projects reference in deployment.yaml, e.g. "disk0".
 	Name string `json:"name"`
-	// Path is the host directory this volume is rooted at.
+	// Path is the host directory this volume is rooted at. An NFS volume
+	// does not need one; when it was converted from a host path the old
+	// value stays, so the conversion can be undone.
 	Path string `json:"path"`
+	// NFS makes publix mount an export itself instead of trusting a host
+	// directory. See NFSMount.
+	NFS *NFSMount `json:"nfs,omitempty"`
 	// Scope decides whether projects get their own directory inside Path
 	// or all share Path itself.
 	Scope VolumeScope `json:"scope,omitempty"`
@@ -266,6 +272,9 @@ func (v Volume) Mount() string {
 // isolation model: a project-scoped volume resolves to a directory named
 // after the project, a shared one to the volume's own root.
 func (v Volume) Dir(projectID string) string {
+	if v.IsNFS() {
+		return v.NFS.Server + ":" + path.Join(path.Clean(v.NFS.Export), v.NFSRel(projectID, ""))
+	}
 	if v.Shared() {
 		return v.Path
 	}
@@ -599,50 +608,55 @@ func (s *Settings) ValidateVolume(v Volume, editing string) error {
 		errs = append(errs, fmt.Sprintf("name %q must be lowercase alphanumeric with dots, dashes or underscores", v.Name))
 	}
 
-	// Clean here rather than trusting the caller: ValidateVolume is the
-	// gate, so it has to see the path the kernel will.
-	path := filepath.Clean(v.Path)
-	switch {
-	case v.Path == "":
-		errs = append(errs, "a host path is required")
-	case !filepath.IsAbs(path):
-		errs = append(errs, fmt.Sprintf("path %q must be absolute", v.Path))
-	case path == "/":
-		errs = append(errs, "path \"/\" is the whole host filesystem and cannot be shared with projects")
-	default:
-		real := resolve(path)
-		for _, forbidden := range s.ProtectedPaths() {
-			if within(path, forbidden) || within(real, forbidden) {
-				where := path
-				if real != path {
-					where = fmt.Sprintf("%s (which resolves to %s)", path, real)
+	if v.IsNFS() {
+		errs = append(errs, v.NFS.validate()...)
+		errs = append(errs, s.nfsOverlaps(v, editing)...)
+	} else {
+		// Clean here rather than trusting the caller: ValidateVolume is the
+		// gate, so it has to see the path the kernel will.
+		path := filepath.Clean(v.Path)
+		switch {
+		case v.Path == "":
+			errs = append(errs, "a host path is required")
+		case !filepath.IsAbs(path):
+			errs = append(errs, fmt.Sprintf("path %q must be absolute", v.Path))
+		case path == "/":
+			errs = append(errs, "path \"/\" is the whole host filesystem and cannot be shared with projects")
+		default:
+			real := resolve(path)
+			for _, forbidden := range s.ProtectedPaths() {
+				if within(path, forbidden) || within(real, forbidden) {
+					where := path
+					if real != path {
+						where = fmt.Sprintf("%s (which resolves to %s)", path, real)
+					}
+					// "X is inside X" reads as a mistake when the path is the
+					// protected directory itself.
+					relation := "is inside"
+					if path == forbidden || real == forbidden {
+						relation = "is"
+					}
+					errs = append(errs, fmt.Sprintf(
+						"path %s %s %s, which publix will not share with projects", where, relation, forbidden))
+					break
 				}
-				// "X is inside X" reads as a mistake when the path is the
-				// protected directory itself.
-				relation := "is inside"
-				if path == forbidden || real == forbidden {
-					relation = "is"
-				}
-				errs = append(errs, fmt.Sprintf(
-					"path %s %s %s, which publix will not share with projects", where, relation, forbidden))
-				break
 			}
 		}
-	}
 
-	// Nesting one volume inside another quietly destroys the isolation the
-	// scopes promise: a shared volume containing a project volume's root
-	// lets every project read every other project's directory.
-	if filepath.IsAbs(path) {
-		for _, existing := range s.Volumes {
-			if existing.Name == editing {
-				continue
-			}
-			other := filepath.Clean(existing.Path)
-			if within(path, other) || within(other, path) {
-				errs = append(errs, fmt.Sprintf(
-					"path %s overlaps the volume %q at %s; one volume inside another defeats the isolation between them",
-					path, existing.Name, other))
+		// Nesting one volume inside another quietly destroys the isolation the
+		// scopes promise: a shared volume containing a project volume's root
+		// lets every project read every other project's directory.
+		if filepath.IsAbs(path) {
+			for _, existing := range s.Volumes {
+				if existing.Name == editing || existing.IsNFS() {
+					continue
+				}
+				other := filepath.Clean(existing.Path)
+				if within(path, other) || within(other, path) {
+					errs = append(errs, fmt.Sprintf(
+						"path %s overlaps the volume %q at %s; one volume inside another defeats the isolation between them",
+						path, existing.Name, other))
+				}
 			}
 		}
 	}
@@ -715,6 +729,30 @@ func requireDir(dir, volume string) error {
 		return fmt.Errorf("volume %q: %s is not a directory", volume, dir)
 	}
 	return nil
+}
+
+// nfsOverlaps applies the no-nesting rule to exports: a volume inside another
+// defeats the isolation between them on a NAS just as it does on a local
+// disk. Two shared volumes have no isolation to defeat, and a library that
+// lives inside a larger share is an ordinary thing for a NAS to hold.
+func (s *Settings) nfsOverlaps(v Volume, editing string) []string {
+	var errs []string
+	mine := path.Clean(v.NFS.Export)
+	for _, existing := range s.Volumes {
+		if existing.Name == editing || !existing.IsNFS() || existing.NFS.Server != v.NFS.Server {
+			continue
+		}
+		other := path.Clean(existing.NFS.Export)
+		if v.Shared() && existing.Shared() {
+			continue
+		}
+		if within(mine, other) || within(other, mine) {
+			errs = append(errs, fmt.Sprintf(
+				"export %s overlaps the volume %q at %s; one volume inside another defeats the isolation between them",
+				mine, existing.Name, other))
+		}
+	}
+	return errs
 }
 
 // Home is the directory publix keeps its state in.
