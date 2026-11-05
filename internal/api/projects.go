@@ -376,6 +376,21 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, dep)
 }
 
+// handleRedeploy releases the live deployment again without building what is
+// new on the branch.
+func (s *Server) handleRedeploy(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.project(w, r)
+	if !ok {
+		return
+	}
+	dep, err := s.engine.Redeploy(p.ID)
+	if err != nil {
+		writeError(w, statusFor(err), err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, dep)
+}
+
 func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.project(w, r)
 	if !ok {

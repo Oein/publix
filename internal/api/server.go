@@ -110,6 +110,7 @@ func (s *Server) buildRoutes() *http.ServeMux {
 	mux.HandleFunc("PATCH /api/projects/{id}", auth(s.handleUpdateProject))
 	mux.HandleFunc("DELETE /api/projects/{id}", auth(s.handleDeleteProject))
 	mux.HandleFunc("POST /api/projects/{id}/deploy", auth(s.handleDeploy))
+	mux.HandleFunc("POST /api/projects/{id}/redeploy", auth(s.handleRedeploy))
 	mux.HandleFunc("POST /api/projects/{id}/rollback", auth(s.handleRollback))
 	mux.HandleFunc("GET /api/projects/{id}/rollback-plan", auth(s.handleRollbackPlan))
 	mux.HandleFunc("POST /api/projects/{id}/cancel", auth(s.handleCancel))

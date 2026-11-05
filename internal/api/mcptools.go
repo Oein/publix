@@ -220,6 +220,15 @@ func (s *Server) mcpTools() []mcpTool {
 			hints: creates(),
 		},
 		{
+			name:   "redeploy_project",
+			title:  "Redeploy the live version",
+			desc:   "Release the live deployment again, with the same commit, image and deployment.yaml, so a server-side change such as a volume moving to NFS takes effect without shipping anything new from the branch.",
+			method: http.MethodPost,
+			path:   "/api/projects/{id}/redeploy",
+			schema: schemaOf([]string{"id"}, map[string]mcp.Property{"id": projectArg()}),
+			hints:  replaces(),
+		},
+		{
 			name:   "rollback_project",
 			title:  "Roll back a project",
 			desc:   "Return a project to an earlier deployment, bringing back the configuration recorded with it as well as its code. Recent deployments still have their image and come back without a build; older ones are rebuilt from their commit. Call rollback_plan first if it matters which of the two this will be.",

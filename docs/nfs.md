@@ -46,8 +46,10 @@ mounts moves no data:
 publix volumes -nfs data=nfs://192.168.1.10/mnt/tank/data
 ```
 
-Then redeploy each project that uses it. A running container keeps its old
-mount until then, so this can be done one project at a time. The old path is
+Then redeploy each project that uses it with
+`POST /api/projects/{id}/redeploy`, which releases the live version again
+instead of building what is new on the branch. A running container keeps its
+old mount until then, so this can be done one project at a time. The old path is
 kept, and `publix volumes -no-nfs data` goes back to it.
 
 Once every project has moved, the host's own mount is no longer used by

@@ -53,6 +53,39 @@ func (e *Engine) Rollback(projectID, deploymentID string) (*store.Deployment, er
 	return e.Deploy(p.ID, opt)
 }
 
+// Redeploy releases the live deployment again: same commit, same image when
+// it is still on disk, same deployment.yaml. Only what the server decides is
+// re-resolved, such as where a volume comes from. A plain deploy would also
+// pick up whatever has landed on the branch, which is the wrong thing to
+// bundle with a change to the server.
+func (e *Engine) Redeploy(projectID string) (*store.Deployment, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	p, ok := e.store.Project(projectID)
+	if !ok {
+		return nil, &store.NotFoundError{Kind: "project", ID: projectID}
+	}
+	live, ok := p.Deployment(p.Current)
+	if !ok {
+		return nil, fmt.Errorf("%s has no live deployment to redeploy", p.Name)
+	}
+	opt := Options{
+		Trigger: "redeploy",
+		Ref:     live.Branch,
+		Commit:  live.Commit,
+		Message: live.Message,
+		Author:  live.Author,
+		Spec:    live.Spec,
+	}
+	if live.Image != "" {
+		if have, err := e.docker.ImageExists(ctx, live.Image); err == nil && have {
+			opt.Image = live.Image
+		}
+	}
+	return e.Deploy(p.ID, opt)
+}
+
 // RollbackPlan describes what a rollback would do, so the dashboard can say
 // whether it will be instant or need a rebuild before the user commits.
 type RollbackPlan struct {

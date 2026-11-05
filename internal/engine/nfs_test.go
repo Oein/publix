@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -341,6 +342,29 @@ func TestNFSDeployLive(t *testing.T) {
 	h.mustSucceed(h.deploy(a, Options{Trigger: "test"}))
 	if got := exec(a, "cat /seeded/alpha.txt"); !strings.Contains(got, "secret") {
 		t.Errorf("the file did not survive a redeploy: %q", got)
+	}
+
+	// Redeploy releases what is live, not what has landed since.
+	cur, _ := h.store.Project(a.ID)
+	live, _ := cur.Deployment(cur.Current)
+	dir := filepath.Join(h.store.Settings().WorkDir, a.ID)
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM nosuch/image:broken\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	redeployed, err := h.engine.Redeploy(a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := h.await(a.ID, redeployed.ID, 2*time.Minute)
+	h.mustSucceed(finished)
+	if finished.Image != live.Image || finished.Spec != live.Spec {
+		t.Errorf("redeploy changed the release: image %q, want %q", finished.Image, live.Image)
+	}
+	if got := exec(a, "cat /seeded/alpha.txt"); !strings.Contains(got, "secret") {
+		t.Errorf("the file did not survive a redeploy of the live version: %q", got)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(dockerfile), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
 	h.mustSucceed(h.deploy(st, Options{Trigger: "test"}))
