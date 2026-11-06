@@ -25,6 +25,8 @@
   let removing = $state(null);
   // The volume being moved onto an export, when the NFS dialog is open.
   let converting = $state(null);
+  // The volume waiting on the warning before it goes back to a host path.
+  let reverting = $state(null);
 
   let name = $state('');
   let path = $state('');
@@ -105,10 +107,11 @@
     }
   }
 
-  async function revert(vol) {
+  async function revert() {
     try {
-      settings = await api.settings.clearVolumeNFS(vol.name);
-      notify.success(t('vol.nfsReverted', { name: vol.name }));
+      settings = await api.settings.clearVolumeNFS(reverting.name);
+      notify.success(t('vol.nfsReverted', { name: reverting.name }));
+      reverting = null;
     } catch (err) {
       notify.error(err);
     }
@@ -173,7 +176,7 @@
               </div>
               {#if vol.description}<div class="sub">{vol.description}</div>{/if}
             </td>
-            <td class="faint mono">{vol.example}</td>
+            <td class="faint mono source">{vol.example}</td>
             <td class="faint mono">{vol.mount}</td>
             <td>
               {#if vol.usedBy.length}
@@ -183,14 +186,16 @@
               {/if}
             </td>
             <td class="actions">
-              {#if !vol.nfs}
-                <Button size="sm" onclick={() => openConvert(vol)}>{t('vol.nfsConvert')}</Button>
-              {:else if vol.path}
-                <Button size="sm" onclick={() => revert(vol)}>{t('vol.nfsRevert')}</Button>
-              {/if}
-              <Button size="sm" variant="danger" onclick={() => (removing = vol)}>
-                {t('vol.unregister')}
-              </Button>
+              <div class="row-actions">
+                {#if !vol.nfs}
+                  <Button size="sm" onclick={() => openConvert(vol)}>{t('vol.nfsConvert')}</Button>
+                {:else if vol.path}
+                  <Button size="sm" onclick={() => (reverting = vol)}>{t('vol.nfsRevert')}</Button>
+                {/if}
+                <Button size="sm" variant="danger" onclick={() => (removing = vol)}>
+                  {t('vol.unregister')}
+                </Button>
+              </div>
             </td>
           </tr>
         {/each}
@@ -402,6 +407,17 @@
   </Modal>
 {/if}
 
+{#if reverting}
+  <Confirm
+    title={t('vol.nfsRevertTitle', { name: reverting.name })}
+    message={t('vol.nfsRevertMessage', { path: reverting.path })}
+    confirmLabel={t('vol.nfsRevert')}
+    danger
+    onconfirm={revert}
+    onclose={() => (reverting = null)}
+  />
+{/if}
+
 {#if removing}
   <Confirm
     title={t('vol.unregisterTitle', { name: removing.name })}
@@ -414,6 +430,17 @@
 {/if}
 
 <style>
+  .row-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+  }
+
+  .source {
+    overflow-wrap: anywhere;
+  }
+
   .sources {
     display: grid;
     gap: 6px;
