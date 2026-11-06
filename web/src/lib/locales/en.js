@@ -522,6 +522,8 @@ export default {
   'vol.nfsConverted': '{name} now uses NFS. Redeploy its projects to apply.',
   'vol.nfsRevert': 'Back to host path',
   'vol.nfsReverted': '{name} is back on its host path. Redeploy its projects to apply.',
+  'vol.nfsRevertTitle': 'Move {name} back to its host path?',
+  'vol.nfsRevertMessage': 'The next deploy will use {path}. If nothing is mounted there, containers will start on an empty local folder and their data will appear to be gone.',
   'vol.registered': 'Registered {name}',
   'vol.unregistered': 'Unregistered {name} — its data was left on disk.',
   'vol.unregisterTitle': 'Unregister {name}?',

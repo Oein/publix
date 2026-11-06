@@ -50,10 +50,20 @@ Then redeploy each project that uses it with
 `POST /api/projects/{id}/redeploy`, which releases the live version again
 instead of building what is new on the branch. A running container keeps its
 old mount until then, so this can be done one project at a time. The old path is
-kept, and `publix volumes -no-nfs data` goes back to it.
+kept, and `publix volumes -no-nfs data` goes back to it. Only do that while the
+host path is really mounted: otherwise the next deploy binds an empty local
+directory.
 
-Once every project has moved, the host's own mount is no longer used by
-publix and its `fstab` line and the `/mnt` bind on the publix container can go.
+Once every project has moved, publix no longer needs the `/mnt` bind on its own
+container. Check before removing the host's `fstab` lines:
+
+- **A local backup target** on the NAS still uses the host mount, because
+  backups are written through a host path. Keep that line and add
+  `x-systemd.automount`. A late NAS then mounts on first use, and a missing one
+  fails the backup rather than filling the local disk.
+- **Anything that makes Docker wait for the mount**, such as
+  `RequiresMountsFor`, has to go. Docker would refuse to start without the NAS,
+  and containers could never be restarted when it returns.
 
 ## What happens when the NAS is away
 

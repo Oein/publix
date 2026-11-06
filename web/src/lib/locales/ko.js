@@ -512,6 +512,8 @@ export default {
   'vol.nfsConverted': '{name} 을(를) NFS로 전환했습니다. 프로젝트를 다시 배포하면 적용됩니다.',
   'vol.nfsRevert': '호스트 경로로 복귀',
   'vol.nfsReverted': '{name} 을(를) 호스트 경로로 되돌렸습니다. 프로젝트를 다시 배포하면 적용됩니다.',
+  'vol.nfsRevertTitle': '{name} 을(를) 호스트 경로로 되돌릴까요?',
+  'vol.nfsRevertMessage': '다음 배포부터 {path} 를 사용합니다. 그 경로에 NFS가 실제로 마운트돼 있지 않으면 컨테이너가 빈 로컬 폴더로 시작되어 데이터가 사라진 것처럼 보입니다.',
   'vol.registered': '{name} 을(를) 등록했습니다',
   'vol.unregistered': '{name} 의 등록을 해제했습니다 — 데이터는 디스크에 그대로 남았습니다.',
   'vol.unregisterTitle': '{name} 의 등록을 해제할까요?',
