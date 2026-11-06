@@ -171,20 +171,7 @@ func (e *Engine) probe(ctx context.Context, dc *Context, containerID string) err
 		}
 		return fmt.Errorf("container has no address on the %q network yet", dc.Settings.Network)
 	}
-	port := h.Port
-	if port == 0 {
-		port = dc.Spec.Port
-	}
-	// A compose stack's services listen on different ports, and the probe
-	// has to use the one this container actually serves — the same port
-	// Traefik was told about. An explicit health.port still wins, because
-	// that is someone saying they know better; a defaulted one is only the
-	// project's own port standing in, which for a stack is a guess.
-	if h.PortDefaulted() {
-		if p, ok := dc.ProbePorts[containerID]; ok && p > 0 {
-			port = p
-		}
-	}
+	port := probePort(dc, h, containerID)
 	addr := net.JoinHostPort(ip, strconv.Itoa(port))
 
 	if h.Type == deployspec.HealthTCP {
@@ -241,4 +228,30 @@ func firstLine(s string) string {
 		return s[:i]
 	}
 	return s
+}
+
+// probePort picks the port to health-check a container on.
+//
+// A compose stack's services listen on different ports, and the probe has to
+// use the one this container actually serves: the same port Traefik was told
+// about. An explicit health.port still wins, because that is someone saying
+// they know better. A defaulted one is only the project's own port standing
+// in, which for a stack is a guess.
+//
+// Whether a port was defaulted does not survive being written out: a
+// deployment's recorded spec has it filled in, so a rollback or redeploy reads
+// it back as if it had been written by hand. A health.port equal to the
+// project's port therefore counts as defaulted too. Nobody means to probe every
+// service of a stack on the port only one of them listens on.
+func probePort(dc *Context, h deployspec.Health, containerID string) int {
+	port := h.Port
+	if port == 0 {
+		port = dc.Spec.Port
+	}
+	if h.PortDefaulted() || port == dc.Spec.Port {
+		if p, ok := dc.ProbePorts[containerID]; ok && p > 0 {
+			return p
+		}
+	}
+	return port
 }
